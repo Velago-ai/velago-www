@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
+  <rect width="200" height="60" rx="8" fill="#2B2D82"/>
+  <text x="100" y="40" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="28" fill="#fff" letter-spacing="1">IndiGo</text>
+  <circle cx="170" cy="20" r="8" fill="#fff" opacity="0.3"/>
+</svg>
