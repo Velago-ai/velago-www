@@ -28,10 +28,9 @@ jobs:
     steps:
       - name: Display deploy context
         run: |
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Target: ${{ inputs.target || 'app (auto)' }}"
-          echo "Environment: ${{ env.ENVIRONMENT }}"
-          echo "Triggered by: ${{ github.actor }}"
+          echo "Branch:      ${{ github.ref_name }}"
+          echo "Target:      ${{ inputs.target || 'app (push)' }}"
+          echo "Triggered:   ${{ github.actor }}"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,31 +42,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set CDK environment
+      # ── Infrastructure (manual only) ───────────────────────────────────
+      - name: Set CDK account env
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.target == 'infra' || inputs.target == 'all')
         run: |
           echo "CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
           echo "CDK_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
 
       - name: Setup Python
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.target == 'infra' || inputs.target == 'all')
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Setup Node (for CDK)
+      - name: Setup Node for CDK
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.target == 'infra' || inputs.target == 'all')
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Install CDK CLI
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.target == 'infra' || inputs.target == 'all')
         run: npm install -g aws-cdk
 
       - name: Install CDK Python deps
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (inputs.target == 'infra' || inputs.target == 'all')
         working-directory: cdk
         run: pip install -r requirements.txt
 
-      # ── Infrastructure ─────────────────────────────────────────────────
-      - name: Get backend DNS outputs
+      - name: Get backend DNS certificate ARN
         if: >
           github.event_name == 'workflow_dispatch' &&
           (inputs.target == 'infra' || inputs.target == 'all')
@@ -84,7 +97,10 @@ jobs:
           github.event_name == 'workflow_dispatch' &&
           (inputs.target == 'infra' || inputs.target == 'all')
         working-directory: cdk
-        run: cdk bootstrap aws://${{ env.CDK_DEFAULT_ACCOUNT }}/${{ env.AWS_REGION }} --context env=${{ env.ENVIRONMENT }}
+        run: |
+          cdk bootstrap \
+            aws://${{ env.CDK_DEFAULT_ACCOUNT }}/${{ env.AWS_REGION }} \
+            --context env=${{ env.ENVIRONMENT }}
 
       - name: CDK diff
         if: >
@@ -107,12 +123,24 @@ jobs:
             --context env=${{ env.ENVIRONMENT }} \
             --context certificate_arn=${{ steps.dns.outputs.certificate_arn }}
 
-      # ── Get stack outputs ──────────────────────────────────────────────
-      - name: Get stack outputs
+      # ── App deploy ─────────────────────────────────────────────────────
+      - name: Check stack exists
         if: >
           github.event_name == 'push' ||
           inputs.target == 'app' ||
           inputs.target == 'all'
+        id: stack
+        run: |
+          if aws cloudformation describe-stacks \
+               --stack-name ${{ env.STACK_NAME }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Stack ${{ env.STACK_NAME }} not found — run workflow with target=infra first"
+          fi
+
+      - name: Get stack outputs
+        if: steps.stack.outputs.exists == 'true'
         id: outputs
         run: |
           OUTPUTS=$(aws cloudformation describe-stacks \
@@ -123,36 +151,32 @@ jobs:
             echo "$OUTPUTS" | jq -r ".[] | select(.OutputKey==\"$1\") | .OutputValue"
           }
 
-          echo "bucket=$(get_output BucketName)" >> $GITHUB_OUTPUT
+          echo "bucket=$(get_output BucketName)"             >> $GITHUB_OUTPUT
           echo "distribution_id=$(get_output DistributionId)" >> $GITHUB_OUTPUT
           echo "cognito_user_pool_id=$(get_output CognitoUserPoolId)" >> $GITHUB_OUTPUT
-          echo "cognito_client_id=$(get_output CognitoWebClientId)" >> $GITHUB_OUTPUT
+          echo "cognito_client_id=$(get_output CognitoWebClientId)"   >> $GITHUB_OUTPUT
 
-      # ── Build frontend ─────────────────────────────────────────────────
+      - name: Setup Node for build
+        if: steps.stack.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
       - name: Install npm dependencies
-        if: >
-          github.event_name == 'push' ||
-          inputs.target == 'app' ||
-          inputs.target == 'all'
+        if: steps.stack.outputs.exists == 'true'
         run: npm ci
 
       - name: Build
-        if: >
-          github.event_name == 'push' ||
-          inputs.target == 'app' ||
-          inputs.target == 'all'
+        if: steps.stack.outputs.exists == 'true'
         run: npm run build
         env:
           VITE_COGNITO_USER_POOL_ID: ${{ steps.outputs.outputs.cognito_user_pool_id }}
           VITE_COGNITO_CLIENT_ID: ${{ steps.outputs.outputs.cognito_client_id }}
           VITE_API_URL: https://api.velago.ai
 
-      # ── Deploy to S3 + CloudFront ──────────────────────────────────────
       - name: Sync hashed assets (long-lived cache)
-        if: >
-          github.event_name == 'push' ||
-          inputs.target == 'app' ||
-          inputs.target == 'all'
+        if: steps.stack.outputs.exists == 'true'
         run: |
           aws s3 sync app/dist s3://${{ steps.outputs.outputs.bucket }} \
             --delete \
@@ -160,10 +184,7 @@ jobs:
             --cache-control "public, max-age=31536000, immutable"
 
       - name: Sync HTML (no cache)
-        if: >
-          github.event_name == 'push' ||
-          inputs.target == 'app' ||
-          inputs.target == 'all'
+        if: steps.stack.outputs.exists == 'true'
         run: |
           aws s3 sync app/dist s3://${{ steps.outputs.outputs.bucket }} \
             --exclude "*" \
@@ -171,10 +192,7 @@ jobs:
             --cache-control "no-cache, no-store, must-revalidate"
 
       - name: Invalidate CloudFront cache
-        if: >
-          github.event_name == 'push' ||
-          inputs.target == 'app' ||
-          inputs.target == 'all'
+        if: steps.stack.outputs.exists == 'true'
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ steps.outputs.outputs.distribution_id }} \
