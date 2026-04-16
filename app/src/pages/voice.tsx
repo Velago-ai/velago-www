@@ -159,7 +159,6 @@ export default function Voice() {
   const [textInput, setTextInput] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [audioBlocked, setAudioBlocked] = useState(false);
 
   // Imperative refs — Web Audio + WebSocket (no re-render needed)
   const wsRef = useRef<WebSocket | null>(null);
@@ -183,29 +182,8 @@ export default function Voice() {
   useEffect(() => {
     const token = getAccessToken();
     if (!token) { setLocation("/auth"); return; }
-    void connect(token);
     fetchMe(token).then(setProfile).catch(() => null);
     return () => { wsRef.current?.close(1000); };
-  }, []);
-
-  // ── Autoplay unlock ──────────────────────────────────────────────────────
-  // Browsers block AudioContext until a user gesture. When the user arrives
-  // via auto-redirect (no click), the context stays suspended. We listen for
-  // the first interaction and resume it.
-
-  useEffect(() => {
-    const unlock = async () => {
-      if (playCtxRef.current?.state === "suspended") {
-        await playCtxRef.current.resume().catch(() => null);
-        if (playCtxRef.current.state === "running") setAudioBlocked(false);
-      }
-    };
-    document.addEventListener("click", unlock);
-    document.addEventListener("keydown", unlock);
-    return () => {
-      document.removeEventListener("click", unlock);
-      document.removeEventListener("keydown", unlock);
-    };
   }, []);
 
   // Auto-scroll
@@ -217,14 +195,7 @@ export default function Voice() {
 
   async function ensurePlayback() {
     if (!playCtxRef.current) playCtxRef.current = new AudioContext({ sampleRate: PLAYBACK_RATE });
-    if (playCtxRef.current.state === "suspended") {
-      await playCtxRef.current.resume().catch(() => null);
-    }
-    if (playCtxRef.current.state === "suspended") {
-      setAudioBlocked(true);
-    } else {
-      setAudioBlocked(false);
-    }
+    if (playCtxRef.current.state === "suspended") await playCtxRef.current.resume();
     if (playbackCursorRef.current < playCtxRef.current.currentTime)
       playbackCursorRef.current = playCtxRef.current.currentTime;
   }
@@ -482,6 +453,15 @@ export default function Voice() {
     };
   }
 
+  // ── Session start ────────────────────────────────────────────────────────
+
+  function startSession() {
+    const token = getAccessToken();
+    if (!token) { setLocation("/auth"); return; }
+    setTranscript([]);
+    connect(token);
+  }
+
   // ── Mic ──────────────────────────────────────────────────────────────────
 
   async function startRecording() {
@@ -618,47 +598,48 @@ export default function Voice() {
         </div>
       )}
 
-      {/* Audio blocked banner */}
-      {audioBlocked && (
-        <div className="px-4 pt-3 max-w-xl w-full mx-auto">
-          <button
-            onClick={() => playCtxRef.current?.resume().then(() => setAudioBlocked(false))}
-            className="w-full bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-xs text-amber-700 text-center hover:bg-amber-100 transition-colors"
-          >
-            🔇 Tap here to enable audio
-          </button>
-        </div>
-      )}
-
       {/* Mic area */}
       <div className="flex flex-col items-center py-8 px-4">
-        <div className="relative group mb-3">
-          <button
-            onClick={toggleMic}
-            disabled={!isConnected}
-            className={`relative z-10 flex items-center justify-center w-24 h-24 rounded-full text-white transition-all duration-300 shadow-xl
-              ${isConnected ? "bg-primary-gradient" : "bg-muted cursor-not-allowed"}
-              ${isRecording ? "scale-105 animate-breathing" : isConnected ? "hover:scale-105" : ""}
-            `}
-            aria-label="Tap to talk"
-          >
-            {isRecording ? (
-              <MicOff className="w-9 h-9" />
-            ) : (
+        {status === "disconnected" || status === "error" ? (
+          <>
+            <button
+              onClick={startSession}
+              className="relative z-10 flex items-center justify-center w-24 h-24 rounded-full bg-primary-gradient text-white shadow-xl hover:scale-105 transition-transform duration-300"
+              aria-label="Start new session"
+            >
               <Mic className="w-9 h-9" />
-            )}
-          </button>
-          {isConnected && (
-            <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl -z-10 scale-150 group-hover:bg-primary/30 transition-colors" />
-          )}
-        </div>
-        <span className="text-sm text-muted-foreground">
-          {!isConnected
-            ? status === "connecting" ? "Connecting…" : "Reconnecting…"
-            : isRecording
-            ? "Listening… tap to stop"
-            : "Tap to speak"}
-        </span>
+            </button>
+            <span className="text-sm text-muted-foreground mt-3">
+              {status === "error" ? "Connection error — " : ""}Start new session
+            </span>
+          </>
+        ) : (
+          <>
+            <div className="relative group mb-3">
+              <button
+                onClick={toggleMic}
+                disabled={!isConnected}
+                className={`relative z-10 flex items-center justify-center w-24 h-24 rounded-full text-white transition-all duration-300 shadow-xl
+                  ${isConnected ? "bg-primary-gradient" : "bg-muted cursor-not-allowed"}
+                  ${isRecording ? "scale-105 animate-breathing" : isConnected ? "hover:scale-105" : ""}
+                `}
+                aria-label="Tap to talk"
+              >
+                {isRecording ? <MicOff className="w-9 h-9" /> : <Mic className="w-9 h-9" />}
+              </button>
+              {isConnected && (
+                <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl -z-10 scale-150 group-hover:bg-primary/30 transition-colors" />
+              )}
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {status === "connecting"
+                ? "Connecting…"
+                : isRecording
+                ? "Listening… tap to stop"
+                : "Tap to speak"}
+            </span>
+          </>
+        )}
       </div>
 
       {/* Transcript */}
@@ -666,7 +647,9 @@ export default function Voice() {
         <div className="flex-1 bg-white rounded-3xl border border-border overflow-y-auto p-4 flex flex-col gap-2 min-h-[200px] max-h-[50vh]">
           {transcript.length === 0 && !isTyping && (
             <p className="text-center text-sm text-muted-foreground py-8">
-              Start speaking — Vela is ready
+              {status === "disconnected" || status === "error"
+                ? "Press Start new session to begin"
+                : "Vela is ready — start speaking"}
             </p>
           )}
 
