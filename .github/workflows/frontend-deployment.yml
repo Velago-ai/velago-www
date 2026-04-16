@@ -65,7 +65,7 @@ jobs:
           (inputs.target == 'infra' || inputs.target == 'all')
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install CDK CLI
         if: >
@@ -161,12 +161,13 @@ jobs:
         if: steps.stack.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: "22"
 
       - name: Install npm dependencies
         if: steps.stack.outputs.exists == 'true'
-        run: npm install
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
 
       - name: Build
         if: steps.stack.outputs.exists == 'true'
