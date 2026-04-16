@@ -100,7 +100,8 @@ jobs:
         run: |
           cdk bootstrap \
             aws://${{ env.CDK_DEFAULT_ACCOUNT }}/${{ env.AWS_REGION }} \
-            --context env=${{ env.ENVIRONMENT }}
+            --context env=${{ env.ENVIRONMENT }} \
+            --context certificate_arn=${{ steps.dns.outputs.certificate_arn }}
 
       - name: CDK diff
         if: >
