@@ -159,6 +159,7 @@ export default function Voice() {
   const [textInput, setTextInput] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [audioBlocked, setAudioBlocked] = useState(false);
 
   // Imperative refs — Web Audio + WebSocket (no re-render needed)
   const wsRef = useRef<WebSocket | null>(null);
@@ -187,6 +188,26 @@ export default function Voice() {
     return () => { wsRef.current?.close(1000); };
   }, []);
 
+  // ── Autoplay unlock ──────────────────────────────────────────────────────
+  // Browsers block AudioContext until a user gesture. When the user arrives
+  // via auto-redirect (no click), the context stays suspended. We listen for
+  // the first interaction and resume it.
+
+  useEffect(() => {
+    const unlock = async () => {
+      if (playCtxRef.current?.state === "suspended") {
+        await playCtxRef.current.resume().catch(() => null);
+        if (playCtxRef.current.state === "running") setAudioBlocked(false);
+      }
+    };
+    document.addEventListener("click", unlock);
+    document.addEventListener("keydown", unlock);
+    return () => {
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
   // Auto-scroll
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -196,7 +217,14 @@ export default function Voice() {
 
   async function ensurePlayback() {
     if (!playCtxRef.current) playCtxRef.current = new AudioContext({ sampleRate: PLAYBACK_RATE });
-    if (playCtxRef.current.state === "suspended") await playCtxRef.current.resume();
+    if (playCtxRef.current.state === "suspended") {
+      await playCtxRef.current.resume().catch(() => null);
+    }
+    if (playCtxRef.current.state === "suspended") {
+      setAudioBlocked(true);
+    } else {
+      setAudioBlocked(false);
+    }
     if (playbackCursorRef.current < playCtxRef.current.currentTime)
       playbackCursorRef.current = playCtxRef.current.currentTime;
   }
@@ -587,6 +615,18 @@ export default function Voice() {
             {addr?.address && <span><span className="font-medium text-foreground">Address</span> {String(addr.address)}</span>}
             {(addr?.city) && <span><span className="font-medium text-foreground">City</span> {String(addr.city)}</span>}
           </div>
+        </div>
+      )}
+
+      {/* Audio blocked banner */}
+      {audioBlocked && (
+        <div className="px-4 pt-3 max-w-xl w-full mx-auto">
+          <button
+            onClick={() => playCtxRef.current?.resume().then(() => setAudioBlocked(false))}
+            className="w-full bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-xs text-amber-700 text-center hover:bg-amber-100 transition-colors"
+          >
+            🔇 Tap here to enable audio
+          </button>
         </div>
       )}
 
