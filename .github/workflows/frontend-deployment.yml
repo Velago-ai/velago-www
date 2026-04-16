@@ -166,7 +166,7 @@ jobs:
 
       - name: Install npm dependencies
         if: steps.stack.outputs.exists == 'true'
-        run: npm ci
+        run: npm install
 
       - name: Build
         if: steps.stack.outputs.exists == 'true'
