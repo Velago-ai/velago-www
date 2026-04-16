@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useSpeech } from "@/hooks/use-speech";
+import { isAuthenticated } from "@/lib/auth";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
 
 
@@ -21,6 +22,13 @@ const CAROUSEL_TEXTS = [
 export default function Home() {
   const [, setLocation] = useLocation();
   const { isListening, transcript, isSupported, toggleListening, setTranscript } = useSpeech();
+
+  // Redirect already-authenticated users straight to the voice page
+  useEffect(() => {
+    if (isAuthenticated()) {
+      setLocation("/voice");
+    }
+  }, []);
   const [inputText, setInputText] = useState("");
   const [response, setResponse] = useState<string | null>(null);
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -77,6 +85,13 @@ export default function Home() {
       {/* Header */}
       <header className="w-full py-6 px-6 md:px-12 flex justify-between items-center max-w-7xl mx-auto">
         <img src={velagoLogo} alt="VelaGo Logo" className="h-14 md:h-20 object-contain" style={{ filter: LOGO_BLUE_FILTER }} />
+        <Button
+          variant="outline"
+          className="rounded-full px-6 h-10 border-primary/30 text-primary hover:bg-primary/5"
+          onClick={() => setLocation("/auth")}
+        >
+          Sign in
+        </Button>
       </header>
 
       {/* Hero Section */}
