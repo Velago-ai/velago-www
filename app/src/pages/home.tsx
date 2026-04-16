@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useLocation } from "wouter";
 import { useSpeech } from "@/hooks/use-speech";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
 
@@ -18,6 +19,7 @@ const CAROUSEL_TEXTS = [
 ];
 
 export default function Home() {
+  const [, setLocation] = useLocation();
   const { isListening, transcript, isSupported, toggleListening, setTranscript } = useSpeech();
   const [inputText, setInputText] = useState("");
   const [response, setResponse] = useState<string | null>(null);
@@ -164,7 +166,7 @@ export default function Home() {
             <p className="text-2xl font-medium text-foreground mb-8">"{response}"</p>
             <div className="flex gap-4">
               <Button onClick={() => setResponse(null)} variant="outline" className="rounded-full px-6 h-12">Clear</Button>
-              <Button className="rounded-full px-6 h-12 bg-primary-gradient text-white border-0">Continue Flow</Button>
+              <Button onClick={() => setLocation("/auth")} className="rounded-full px-6 h-12 bg-primary-gradient text-white border-0">Continue Flow</Button>
             </div>
           </div>
         </section>
