@@ -1,0 +1,182 @@
+name: Deploy Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "What to deploy"
+        required: true
+        type: choice
+        options:
+          - app
+          - infra
+          - all
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT: velago
+  ENVIRONMENT: staging
+  DEEPGRAM_SECRET_NAME: deepgram/api-key
+  OPENAI_SECRET_NAME: openai/api-key
+  MESHHUB_SECRET_NAME: meshhub/api-key
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Display deploy context
+        run: |
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Target: ${{ inputs.target }}"
+          echo "Environment: ${{ env.ENVIRONMENT }}"
+          echo "Triggered by: ${{ github.actor }}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set CDK environment
+        run: |
+          echo "CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+          echo "CDK_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+          echo "AWS_DEFAULT_REGION=${{ env.AWS_REGION }}" >> $GITHUB_ENV
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node (for CDK)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Install CDK Python deps
+        working-directory: cdk
+        run: pip install -r requirements.txt
+
+      - name: CDK bootstrap
+        working-directory: cdk
+        run: cdk bootstrap aws://${{ env.CDK_DEFAULT_ACCOUNT }}/${{ env.AWS_REGION }} --context env=${{ env.ENVIRONMENT }}
+
+      - name: CDK diff
+        working-directory: cdk
+        run: |
+          cdk diff \
+            --context env=${{ env.ENVIRONMENT }} \
+            --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+            --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+            --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }} || true
+
+      - name: CDK deploy - Infra stacks
+        if: inputs.target == 'infra'
+        working-directory: cdk
+        run: |
+          cdk deploy \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-dns \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-network \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-data \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-auth \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-events \
+            --require-approval never \
+            --context env=${{ env.ENVIRONMENT }} \
+            --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+            --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+            --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }}
+
+      - name: CDK deploy - App stacks
+        if: inputs.target == 'app'
+        working-directory: cdk
+        run: |
+          cdk deploy \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-workers \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-api \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-websocket \
+            --require-approval never \
+            --context env=${{ env.ENVIRONMENT }} \
+            --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+            --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+            --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }}
+
+      - name: CDK deploy - All stacks (safe order)
+        if: inputs.target == 'all'
+        working-directory: cdk
+        run: |
+          DATA_STACK="${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-data"
+
+          cdk deploy \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-dns \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-network \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-auth \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-events \
+            --require-approval never \
+            --context env=${{ env.ENVIRONMENT }} \
+            --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+            --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+            --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }}
+
+          if ! aws cloudformation describe-stacks --stack-name "$DATA_STACK" >/dev/null 2>&1; then
+            cdk deploy \
+              "$DATA_STACK" \
+              --require-approval never \
+              --context env=${{ env.ENVIRONMENT }} \
+              --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+              --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+              --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }}
+          fi
+
+          cdk deploy \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-workers \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-api \
+            ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-websocket \
+            --exclusively \
+            --require-approval never \
+            --context env=${{ env.ENVIRONMENT }} \
+            --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+            --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+            --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }}
+
+          cdk deploy \
+            "$DATA_STACK" \
+            --exclusively \
+            --require-approval never \
+            --context env=${{ env.ENVIRONMENT }} \
+            --context deepgram_secret_name=${{ env.DEEPGRAM_SECRET_NAME }} \
+            --context openai_secret_name=${{ env.OPENAI_SECRET_NAME }} \
+            --context meshhub_secret_name=${{ env.MESHHUB_SECRET_NAME }}
+
+      - name: Smoke test - health check
+        if: inputs.target == 'app' || inputs.target == 'all'
+        run: |
+          sleep 10
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-api \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceUrl'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -z "$API_URL" ]; then
+            echo "Could not resolve API URL, skipping smoke test"
+            exit 0
+          fi
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${API_URL}/health" --max-time 10)
+          if [ "$STATUS" = "200" ]; then
+            echo "Health check passed (HTTP $STATUS)"
+          else
+            echo "Health check failed (HTTP $STATUS)"
+            exit 1
+          fi
