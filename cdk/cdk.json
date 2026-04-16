@@ -1,0 +1,8 @@
+{
+  "app": "python app.py",
+  "context": {
+    "env": "staging",
+    "project": "velago",
+    "aws_region": "us-east-1"
+  }
+}

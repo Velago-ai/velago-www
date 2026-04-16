@@ -1,9 +1,8 @@
 import { defineConfig, InputTransformerFn } from "orval";
-import path from "path";
+import * as path from "path";
 
 const root = path.resolve(__dirname, "..", "..");
 const apiClientReactSrc = path.resolve(root, "lib", "api-client-react", "src");
-const apiZodSrc = path.resolve(root, "lib", "api-zod", "src");
 
 const titleTransformer: InputTransformerFn = (config) => {
   config.info ??= {};
