@@ -73,6 +73,8 @@ export interface UpdateProfile {
   last_name?: string;
   title?: string;
   phone?: string;
+  plan?: string;
+  is_active?: boolean;
   saved_addresses?: Record<string, unknown>;
 }
 
