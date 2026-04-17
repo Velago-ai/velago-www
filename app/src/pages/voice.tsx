@@ -241,7 +241,7 @@ export default function Voice() {
 
   function openProfile() {
     const p = userStore.get();
-    setFormTitle(p?.title ?? "Mr");
+    setFormTitle(p?.title ?? "Mr.");
     setFormFirst(p?.first_name ?? p?.given_name ?? "");
     setFormLast(p?.last_name ?? p?.family_name ?? "");
     setFormEmail(p?.email ?? "");
@@ -715,11 +715,11 @@ export default function Voice() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Mr">Mr</SelectItem>
-                    <SelectItem value="Ms">Ms</SelectItem>
-                    <SelectItem value="Mrs">Mrs</SelectItem>
-                    <SelectItem value="Dr">Dr</SelectItem>
-                    <SelectItem value="Prof">Prof</SelectItem>
+                    <SelectItem value="Mr.">Mr.</SelectItem>
+                    <SelectItem value="Ms.">Ms.</SelectItem>
+                    <SelectItem value="Mrs.">Mrs.</SelectItem>
+                    <SelectItem value="Mx.">Mx.</SelectItem>
+                    <SelectItem value="Dr.">Dr.</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
