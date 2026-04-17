@@ -3,8 +3,13 @@ import { useLocation } from "wouter";
 import { Mic, MicOff, Send, LogOut, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getAccessToken, clearTokens } from "@/lib/auth";
-import { fetchMe, signOut, type UserProfile } from "@/lib/api-auth";
+import { fetchMe, signOut, updateMe } from "@/lib/api-auth";
+import { userStore, useProfile } from "@/lib/user-store";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -61,7 +66,7 @@ interface ConfirmedEntry {
 
 type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry;
 
-// ── Helpers (ported from voice.html) ────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SENDER_FIELDS: [string, string][] = [
   ["sender_name", "Full Name"],
@@ -103,12 +108,37 @@ function pickAddress(saved: Record<string, unknown> | null | undefined) {
   return null;
 }
 
-function formatUserName(p: UserProfile): string {
+function getAddressForForm(saved: Record<string, unknown> | null | undefined) {
+  if (!saved) return { address: "", city: "", postcode: "" };
+  // flat object (e.g. from PATCH response)
+  if (typeof saved.address === "string" || typeof saved.city === "string") {
+    return {
+      address: String(saved.address ?? ""),
+      city: String(saved.city ?? ""),
+      postcode: String(saved.postcode ?? saved.zip ?? ""),
+    };
+  }
+  // nested
+  const addr = pickAddress(saved);
+  return {
+    address: String(addr?.address ?? ""),
+    city: String(addr?.city ?? ""),
+    postcode: String(addr?.postcode ?? addr?.zip ?? ""),
+  };
+}
+
+function formatUserName(p: ReturnType<typeof userStore.get>): string {
+  if (!p) return "";
   const parts = [p.title, p.first_name ?? p.given_name, p.last_name ?? p.family_name]
     .filter(Boolean)
     .join(" ")
     .trim();
   return parts || p.name || p.email || "";
+}
+
+function planLabel(plan: string | undefined): string {
+  if (plan === "pro") return "Pro";
+  return "Demo";
 }
 
 function extractFlightCodes(value: string): string[] {
@@ -152,13 +182,29 @@ function resolveOfferRoute(
 export default function Voice() {
   const [, setLocation] = useLocation();
 
+  // Profile from session store
+  const profile = useProfile();
+
   // UI state
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  // Profile modal
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [formTitle, setFormTitle] = useState("Mr");
+  const [formFirst, setFormFirst] = useState("");
+  const [formLast, setFormLast] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formAddress, setFormAddress] = useState("");
+  const [formCity, setFormCity] = useState("");
+  const [formPostcode, setFormPostcode] = useState("");
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateSuccess, setUpdateSuccess] = useState(false);
 
   // Imperative refs — Web Audio + WebSocket (no re-render needed)
   const wsRef = useRef<WebSocket | null>(null);
@@ -177,12 +223,12 @@ export default function Voice() {
 
   function nextId() { return String(++idCounterRef.current); }
 
-  // ── Auth guard ───────────────────────────────────────────────────────────
+  // ── Auth guard + profile load ────────────────────────────────────────────
 
   useEffect(() => {
     const token = getAccessToken();
     if (!token) { setLocation("/auth"); return; }
-    fetchMe(token).then(setProfile).catch(() => null);
+    fetchMe(token).then((p) => userStore.set(p)).catch(() => null);
     return () => { wsRef.current?.close(1000); };
   }, []);
 
@@ -190,6 +236,52 @@ export default function Voice() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript, isTyping]);
+
+  // ── Profile modal helpers ────────────────────────────────────────────────
+
+  function openProfile() {
+    const p = userStore.get();
+    setFormTitle(p?.title ?? "Mr");
+    setFormFirst(p?.first_name ?? p?.given_name ?? "");
+    setFormLast(p?.last_name ?? p?.family_name ?? "");
+    setFormEmail(p?.email ?? "");
+    setFormPhone(p?.phone ?? p?.phone_number ?? "");
+    const addr = getAddressForForm(p?.saved_addresses);
+    setFormAddress(addr.address);
+    setFormCity(addr.city);
+    setFormPostcode(addr.postcode);
+    setUpdateError(null);
+    setUpdateSuccess(false);
+    setProfileOpen(true);
+  }
+
+  async function handleUpdate() {
+    const token = getAccessToken();
+    if (!token) return;
+    setUpdating(true);
+    setUpdateError(null);
+    setUpdateSuccess(false);
+    try {
+      const updated = await updateMe(token, {
+        title: formTitle,
+        first_name: formFirst,
+        last_name: formLast,
+        email: formEmail,
+        phone: formPhone,
+        saved_addresses: {
+          address: formAddress,
+          city: formCity,
+          postcode: formPostcode,
+        },
+      });
+      userStore.set(updated);
+      setUpdateSuccess(true);
+    } catch (err) {
+      setUpdateError((err as Error).message);
+    } finally {
+      setUpdating(false);
+    }
+  }
 
   // ── Playback ─────────────────────────────────────────────────────────────
 
@@ -256,10 +348,11 @@ export default function Voice() {
 
   // ── WebSocket ────────────────────────────────────────────────────────────
 
-  function connect(token: string) {
+  function connect(token: string | null) {
     void primePlayback();
     setStatus("connecting");
-    const url = `${WS_URL}?token=${encodeURIComponent(token)}`;
+    // Only send token for pro plan; free/demo connects anonymously
+    const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
@@ -381,7 +474,6 @@ export default function Voice() {
       return;
     }
 
-    // Any other event → show typing indicator
     setIsTyping(true);
   }, []);
 
@@ -459,7 +551,9 @@ export default function Voice() {
     const token = getAccessToken();
     if (!token) { setLocation("/auth"); return; }
     setTranscript([]);
-    connect(token);
+    // Send token only for pro plan; anonymous WS for free/demo
+    const plan = userStore.get()?.plan;
+    connect(plan === "pro" ? token : null);
   }
 
   // ── Mic ──────────────────────────────────────────────────────────────────
@@ -534,6 +628,7 @@ export default function Voice() {
     wsRef.current?.close(1000);
     if (token) await signOut(token).catch(() => null);
     clearTokens();
+    userStore.set(null);
     setLocation("/auth");
   }
 
@@ -550,25 +645,39 @@ export default function Voice() {
   // ── Render ───────────────────────────────────────────────────────────────
 
   const isConnected = status === "connected";
-  const addr = pickAddress(profile?.saved_addresses ?? null);
+  const plan = planLabel(profile?.plan);
+  const isPro = profile?.plan === "pro";
 
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background">
       {/* Header */}
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-border px-6 py-4 flex items-center gap-3">
         <img src={velagoLogo} alt="VelaGo" className="h-10 object-contain shrink-0" style={{ filter: LOGO_FILTER }} />
+
+        {/* Profile pill button */}
         <div className="flex-1 min-w-0">
           {profile && (
-            <p className="text-sm font-medium text-foreground truncate">
-              {formatUserName(profile)}
-              {profile.plan && (
-                <span className="ml-2 text-xs text-muted-foreground uppercase tracking-wide">
-                  {profile.plan}
-                </span>
-              )}
-            </p>
+            <button
+              onClick={openProfile}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/5 hover:bg-black/10 border border-black/10 transition-colors text-left max-w-full"
+            >
+              <span className="text-sm font-medium text-foreground truncate">
+                {formatUserName(profile)}
+              </span>
+              <span
+                className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  isPro
+                    ? "bg-primary/15 text-primary"
+                    : "bg-muted-foreground/15 text-muted-foreground"
+                }`}
+              >
+                {plan}
+              </span>
+            </button>
           )}
         </div>
+
+        {/* Status + logout */}
         <div className="flex items-center gap-2 shrink-0">
           {isConnected ? (
             <Wifi className="w-4 h-4 text-green-500" />
@@ -584,19 +693,103 @@ export default function Voice() {
         </div>
       </header>
 
-      {/* User profile card */}
-      {profile && (
-        <div className="px-4 pt-4 max-w-xl w-full mx-auto">
-          <div className="bg-white rounded-2xl px-4 py-3 border border-border text-xs text-muted-foreground grid grid-cols-2 gap-1">
-            {profile.email && <span><span className="font-medium text-foreground">Email</span> {profile.email}</span>}
-            {(profile.phone ?? profile.phone_number) && (
-              <span><span className="font-medium text-foreground">Phone</span> {profile.phone ?? profile.phone_number}</span>
-            )}
-            {addr?.address && <span><span className="font-medium text-foreground">Address</span> {String(addr.address)}</span>}
-            {(addr?.city) && <span><span className="font-medium text-foreground">City</span> {String(addr.city)}</span>}
-          </div>
-        </div>
-      )}
+      {/* Profile Sheet */}
+      <Sheet open={profileOpen} onOpenChange={setProfileOpen}>
+        <SheetContent side="left" className="w-80 sm:w-96 flex flex-col">
+          <SheetHeader>
+            <SheetTitle>Account</SheetTitle>
+          </SheetHeader>
+
+          <Tabs defaultValue="details" className="flex-1 overflow-y-auto mt-2">
+            <TabsList className="w-full">
+              <TabsTrigger value="details" className="flex-1">User details</TabsTrigger>
+              <TabsTrigger value="payment" className="flex-1">Payment methods</TabsTrigger>
+            </TabsList>
+
+            {/* ── User details ── */}
+            <TabsContent value="details" className="mt-4 flex flex-col gap-4 pb-4">
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Title</Label>
+                <Select value={formTitle} onValueChange={setFormTitle}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Mr">Mr</SelectItem>
+                    <SelectItem value="Ms">Ms</SelectItem>
+                    <SelectItem value="Mrs">Mrs</SelectItem>
+                    <SelectItem value="Dr">Dr</SelectItem>
+                    <SelectItem value="Prof">Prof</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">First name</Label>
+                  <Input value={formFirst} onChange={(e) => setFormFirst(e.target.value)} autoComplete="given-name" />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Last name</Label>
+                  <Input value={formLast} onChange={(e) => setFormLast(e.target.value)} autoComplete="family-name" />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Email</Label>
+                <Input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)} autoComplete="email" />
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Phone</Label>
+                <Input type="tel" value={formPhone} onChange={(e) => setFormPhone(e.target.value)} autoComplete="tel" />
+              </div>
+
+              <hr className="border-border" />
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide -mb-2">
+                Delivery address
+              </p>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Street address</Label>
+                <Input value={formAddress} onChange={(e) => setFormAddress(e.target.value)} autoComplete="street-address" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">City</Label>
+                  <Input value={formCity} onChange={(e) => setFormCity(e.target.value)} autoComplete="address-level2" />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">ZIP / Postcode</Label>
+                  <Input value={formPostcode} onChange={(e) => setFormPostcode(e.target.value)} autoComplete="postal-code" />
+                </div>
+              </div>
+
+              {updateError && <p className="text-sm text-destructive">{updateError}</p>}
+              {updateSuccess && <p className="text-sm text-green-600">Saved successfully</p>}
+
+              <Button
+                onClick={handleUpdate}
+                disabled={updating}
+                className="rounded-full bg-primary-gradient text-white border-0 h-10"
+              >
+                {updating ? "Saving…" : "Update"}
+              </Button>
+            </TabsContent>
+
+            {/* ── Payment methods ── */}
+            <TabsContent value="payment" className="mt-4 flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Connect your payment method to book and pay for orders seamlessly.
+              </p>
+              <Button variant="outline" className="rounded-full" disabled>
+                Connect to Revolut
+              </Button>
+            </TabsContent>
+          </Tabs>
+        </SheetContent>
+      </Sheet>
 
       {/* Mic area */}
       <div className="flex flex-col items-center py-8 px-4">
