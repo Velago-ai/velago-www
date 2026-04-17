@@ -1,20 +1,21 @@
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
 
-async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
+async function apiRequest<T>(method: string, path: string, body: unknown, token?: string): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-
+  const res = await fetch(`${BASE}${path}`, { method, headers, body: JSON.stringify(body) });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(err.detail ?? "Request failed");
   }
   return res.json() as Promise<T>;
+}
+
+async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  return apiRequest("POST", path, body, token);
 }
 
 export interface TokenResponse {
@@ -64,4 +65,17 @@ export async function fetchMe(token: string): Promise<UserProfile> {
   });
   if (!res.ok) throw new Error("Failed to fetch profile");
   return res.json() as Promise<UserProfile>;
+}
+
+export interface UpdateProfile {
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  title?: string;
+  phone?: string;
+  saved_addresses?: Record<string, unknown>;
+}
+
+export function updateMe(token: string, data: UpdateProfile): Promise<UserProfile> {
+  return apiRequest("PATCH", "/auth/me", data, token);
 }
