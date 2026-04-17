@@ -42,8 +42,18 @@ export interface UserProfile {
   saved_addresses?: Record<string, unknown>;
 }
 
-export function register(email: string, password: string): Promise<MessageResponse> {
-  return apiPost("/auth/register", { email, password });
+export interface RegisterProfile {
+  title?: string;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  zip?: string;
+}
+
+export function register(email: string, password: string, profile?: RegisterProfile): Promise<MessageResponse> {
+  return apiPost("/auth/register", { email, password, ...profile });
 }
 
 export function confirmEmail(email: string, confirmation_code: string): Promise<MessageResponse> {
