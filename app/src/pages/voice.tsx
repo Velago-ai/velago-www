@@ -626,7 +626,7 @@ export default function Voice() {
     e.preventDefault();
     const text = textInput.trim();
     if (!text || !wsRef.current || wsRef.current.readyState !== 1) return;
-    wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", message: text }));
+    wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
     setTextInput("");
     setIsTyping(true);
   }
