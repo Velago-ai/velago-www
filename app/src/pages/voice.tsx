@@ -801,29 +801,6 @@ export default function Voice() {
         </SheetContent>
       </Sheet>
 
-      {/* User profile card */}
-      {profile && (
-        <div className="px-4 pt-4 max-w-xl w-full mx-auto">
-          <div className="bg-white rounded-2xl px-4 py-3 border border-border text-xs text-muted-foreground grid grid-cols-2 gap-1">
-            {profile.email && (
-              <span><span className="font-medium text-foreground">Email</span> {profile.email}</span>
-            )}
-            {(profile.phone ?? profile.phone_number) && (
-              <span><span className="font-medium text-foreground">Phone</span> {profile.phone ?? profile.phone_number}</span>
-            )}
-            {(() => {
-              const addr = pickAddress(profile.saved_addresses);
-              return (
-                <>
-                  {addr?.address && <span><span className="font-medium text-foreground">Address</span> {String(addr.address)}</span>}
-                  {addr?.city && <span><span className="font-medium text-foreground">City</span> {String(addr.city)}</span>}
-                </>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
       {/* Mic area */}
       <div className="flex flex-col items-center py-8 px-4">
         {status === "disconnected" || status === "error" ? (
