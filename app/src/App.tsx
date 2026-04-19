@@ -6,15 +6,20 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Auth from "@/pages/auth";
 import Voice from "@/pages/voice";
+import Bookings from "@/pages/bookings";
+import Settings from "@/pages/settings";
 
 const queryClient = new QueryClient();
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/" component={Voice} />
+      <Route path="/landing" component={Home} />
       <Route path="/auth" component={Auth} />
       <Route path="/voice" component={Voice} />
+      <Route path="/bookings" component={Bookings} />
+      <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
   );
