@@ -483,6 +483,14 @@ export default function Voice() {
     setIsTyping(true);
   }
 
+  function selectQuote(provider: string) {
+    if (!wsRef.current || wsRef.current.readyState !== 1) return;
+    const text = `Yes, ${provider}`;
+    wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
+    pushEntry({ id: nextId(), type: "text", role: "user", content: text });
+    setIsTyping(true);
+  }
+
   async function handleLogout() {
     const token = getAccessToken();
     wsRef.current?.close(1000);
@@ -530,7 +538,7 @@ export default function Voice() {
         {!isIdle && (
           <div className="flex-1 min-h-0 overflow-y-auto py-4 flex flex-col gap-3">
             {transcript.map((entry, i) => (
-              <Bubble key={entry.id} entry={entry} index={i} />
+              <Bubble key={entry.id} entry={entry} index={i} onSelect={selectQuote} />
             ))}
             {isTyping && <TypingDots />}
             <div ref={transcriptEndRef} />
@@ -630,7 +638,7 @@ function TypingDots() {
   );
 }
 
-function Bubble({ entry, index }: { entry: TranscriptEntry; index: number }) {
+function Bubble({ entry, index, onSelect }: { entry: TranscriptEntry; index: number; onSelect?: (provider: string) => void }) {
   const delay = `${Math.min(index, 6) * 50}ms`;
 
   if (entry.type === "text") {
@@ -713,7 +721,7 @@ function Bubble({ entry, index }: { entry: TranscriptEntry; index: number }) {
             <div className="text-xs font-semibold text-primary uppercase tracking-wide mt-1">{entry.fareName}</div>
           )}
           <div className="mt-3 flex justify-end">
-            <button className="vg-btn-primary py-2 px-5 text-sm">Select</button>
+            <button className="vg-btn-primary py-2 px-5 text-sm" onClick={() => onSelect?.(entry.provider)}>Select</button>
           </div>
         </div>
       </div>
