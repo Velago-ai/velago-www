@@ -55,8 +55,12 @@ export function login(email: string, password: string): Promise<TokenResponse> {
   return apiPost("/auth/login", { email, password });
 }
 
-export function resetPassword(email: string): Promise<MessageResponse> {
+export function requestResetCode(email: string): Promise<MessageResponse> {
   return apiPost("/auth/reset", { email });
+}
+
+export function confirmReset(email: string, confirmation_code: string, new_password: string): Promise<MessageResponse> {
+  return apiPost("/auth/reset", { email, confirmation_code, new_password });
 }
 
 export function signOut(token: string): Promise<MessageResponse> {
