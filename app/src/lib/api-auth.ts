@@ -1,9 +1,65 @@
+import { getAccessToken, getRefreshToken, setTokens, clearTokens } from "./auth";
+import { userStore } from "./user-store";
+
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
+
+let refreshPromise: Promise<string> | null = null;
+
+async function tryRefresh(): Promise<string> {
+  // Deduplicate concurrent refresh attempts
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const rt = getRefreshToken();
+    const at = getAccessToken();
+    if (!rt || !at) throw new Error("No refresh token");
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${at}` },
+      body: JSON.stringify({ refresh_token: rt }),
+    });
+    if (!res.ok) throw new Error("Refresh failed");
+    const data = (await res.json()) as TokenResponse;
+    setTokens(data.access_token, data.refresh_token);
+    return data.access_token;
+  })();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+function forceLogout() {
+  clearTokens();
+  userStore.set(null);
+  window.location.href = "/auth";
+}
 
 async function apiRequest<T>(method: string, path: string, body: unknown, token?: string): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { method, headers, body: JSON.stringify(body) });
+  const res = await fetch(`${BASE}${path}`, { method, headers, body: body != null ? JSON.stringify(body) : undefined });
+
+  if (res.status === 401 && token) {
+    // Try refresh once
+    try {
+      const newToken = await tryRefresh();
+      const retry = await fetch(`${BASE}${path}`, {
+        method,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${newToken}` },
+        body: body != null ? JSON.stringify(body) : undefined,
+      });
+      if (!retry.ok) {
+        const err = await retry.json().catch(() => ({ detail: "Request failed" }));
+        throw new Error(err.detail ?? "Request failed");
+      }
+      return retry.json() as Promise<T>;
+    } catch {
+      forceLogout();
+      throw new Error("Session expired");
+    }
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(err.detail ?? "Request failed");
@@ -11,10 +67,7 @@ async function apiRequest<T>(method: string, path: string, body: unknown, token?
   return res.json() as Promise<T>;
 }
 
-async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-
+function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
   return apiRequest("POST", path, body, token);
 }
 
@@ -67,12 +120,8 @@ export function signOut(token: string): Promise<MessageResponse> {
   return apiPost("/auth/logout", {}, token);
 }
 
-export async function fetchMe(token: string): Promise<UserProfile> {
-  const res = await fetch(`${BASE}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error("Failed to fetch profile");
-  return res.json() as Promise<UserProfile>;
+export function fetchMe(token: string): Promise<UserProfile> {
+  return apiRequest("GET", "/auth/me", null, token);
 }
 
 export interface UpdateProfile {
