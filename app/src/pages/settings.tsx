@@ -233,7 +233,7 @@ export default function Settings() {
                     await requestResetCode(email);
                     clearTokens();
                     userStore.set(null);
-                    setLocation("/auth");
+                    setLocation(`/auth?reset=${encodeURIComponent(email)}`);
                   } catch { /* ignore */ }
                 }}
               >

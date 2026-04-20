@@ -28,7 +28,13 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated()) setLocation("/voice");
+    if (isAuthenticated()) { setLocation("/voice"); return; }
+    const params = new URLSearchParams(window.location.search);
+    const resetEmail = params.get("reset");
+    if (resetEmail) {
+      setEmail(resetEmail);
+      setMode("reset-code");
+    }
   }, []);
 
   function switchMode(m: Mode) {
