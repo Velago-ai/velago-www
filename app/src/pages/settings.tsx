@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/app-layout";
-import { PLACEHOLDER_USER, SAVED_ADDRESSES } from "@/lib/placeholder-data";
-import { ChevronRight, Pencil } from "lucide-react";
+import { ChevronRight, Pencil, Check, X } from "lucide-react";
+import { signOut, fetchMe, updateMe } from "@/lib/api-auth";
+import { getAccessToken, clearTokens } from "@/lib/auth";
+import { userStore, useProfile } from "@/lib/user-store";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -42,8 +45,57 @@ function Row({
   );
 }
 
-function EditLink({ children = "Edit" }: { children?: React.ReactNode }) {
-  return <button className="text-sm font-semibold text-primary hover:underline">{children}</button>;
+function InlineEdit({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (v: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setDraft(value); }, [value]);
+
+  if (!editing) {
+    return (
+      <button
+        className="p-2 rounded-full hover:bg-muted text-muted-foreground"
+        onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      >
+        <Pencil className="w-4 h-4" />
+      </button>
+    );
+  }
+
+  const submit = async () => {
+    if (draft === value) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <input
+        autoFocus
+        className="border border-border rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary/40"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setEditing(false); }}
+        disabled={saving}
+      />
+      <button className="p-1 rounded hover:bg-muted text-primary" onClick={submit} disabled={saving}>
+        <Check className="w-4 h-4" />
+      </button>
+      <button className="p-1 rounded hover:bg-muted text-muted-foreground" onClick={() => setEditing(false)} disabled={saving}>
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
 }
 
 function Toggle({ defaultOn = false, label }: { defaultOn?: boolean; label?: string }) {
@@ -81,8 +133,51 @@ function Chip({ active, children, onClick }: { active: boolean; children: React.
 }
 
 export default function Settings() {
+  const [, setLocation] = useLocation();
+  const profile = useProfile();
   const [prefs, setPrefs] = useState<Record<string, boolean>>({ Food: true, Flights: true, Hotels: false });
   const togglePref = (k: string) => setPrefs((p) => ({ ...p, [k]: !p[k] }));
+
+  // Fetch profile if not loaded yet
+  useEffect(() => {
+    if (!profile) {
+      const token = getAccessToken();
+      if (token) fetchMe(token).then((p) => userStore.set(p)).catch(() => null);
+    }
+  }, [profile]);
+
+  const patchField = async (data: Parameters<typeof updateMe>[1]) => {
+    const token = getAccessToken();
+    if (!token) return;
+    const updated = await updateMe(token, data);
+    userStore.set(updated);
+  };
+
+  const handleLogout = async () => {
+    const token = getAccessToken();
+    if (token) {
+      try { await signOut(token); } catch { /* clear locally even if API fails */ }
+    }
+    clearTokens();
+    userStore.set(null);
+    setLocation("/auth");
+  };
+
+  const handleDeleteAccount = () => {
+    const userId = profile?.email ?? "unknown";
+    window.location.href = `mailto:support@velago.ai?subject=${encodeURIComponent(`Delete user ${userId}`)}`;
+  };
+
+  const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || profile?.name || "";
+
+  // Parse saved_addresses from profile
+  const addresses = profile?.saved_addresses
+    ? Object.entries(profile.saved_addresses).map(([key, val]) => ({
+        id: key,
+        label: key.charAt(0).toUpperCase() + key.slice(1),
+        value: String(val ?? ""),
+      }))
+    : [];
 
   return (
     <AppLayout>
@@ -98,32 +193,59 @@ export default function Settings() {
                 Connected
               </span>
             }
-            action={<EditLink>Manage</EditLink>}
           />
-          <Row label="Credit card" value="Visa ···· 4242 · 09/27" action={<EditLink>Change</EditLink>} />
+          <Row label="Credit card" value="Visa ···· 4242 · 09/27" />
           <Row label="" value={<span className="text-primary font-semibold">+ Add payment method</span>} onClick={() => undefined} />
         </Section>
 
         <Section title="Account">
-          <Row label="Email" value={PLACEHOLDER_USER.email} action={<EditLink />} />
-          <Row label="Full name" value={PLACEHOLDER_USER.fullName} action={<EditLink />} />
-          <Row label="Password" value="Not set" action={<EditLink>Set password</EditLink>} />
+          <Row
+            label="Email"
+            value={profile?.email ?? "—"}
+            action={<InlineEdit value={profile?.email ?? ""} onSave={(v) => patchField({ email: v })} />}
+          />
+          <Row
+            label="Full name"
+            value={fullName || "—"}
+            action={
+              <InlineEdit
+                value={fullName}
+                onSave={async (v) => {
+                  const parts = v.trim().split(/\s+/);
+                  const first_name = parts[0] ?? "";
+                  const last_name = parts.slice(1).join(" ");
+                  await patchField({ first_name, last_name });
+                }}
+              />
+            }
+          />
+          <Row
+            label="Phone"
+            value={profile?.phone ?? profile?.phone_number ?? "—"}
+            action={<InlineEdit value={profile?.phone ?? profile?.phone_number ?? ""} onSave={(v) => patchField({ phone: v })} />}
+          />
         </Section>
 
         <Section title="Addresses">
-          {SAVED_ADDRESSES.map((a) => (
+          {addresses.map((a) => (
             <Row
               key={a.id}
               label={a.label}
               value={a.value}
               action={
-                <button className="p-2 rounded-full hover:bg-muted text-muted-foreground">
-                  <Pencil className="w-4 h-4" />
-                </button>
+                <InlineEdit
+                  value={a.value}
+                  onSave={async (v) => {
+                    const updated = { ...profile?.saved_addresses, [a.id]: v };
+                    await patchField({ saved_addresses: updated });
+                  }}
+                />
               }
             />
           ))}
-          <Row label="" value={<span className="text-primary font-semibold">+ Add address</span>} onClick={() => undefined} />
+          {addresses.length === 0 && (
+            <Row label="" value={<span className="text-muted-foreground text-xs">No saved addresses</span>} />
+          )}
         </Section>
 
         <Section title="Preferences">
@@ -149,8 +271,8 @@ export default function Settings() {
         </Section>
 
         <Section title="Danger zone">
-          <Row label="Log out" destructive action={<ChevronRight className="w-4 h-4 text-destructive" />} onClick={() => undefined} />
-          <Row label="Delete account" destructive action={<ChevronRight className="w-4 h-4 text-destructive/70" />} onClick={() => undefined} />
+          <Row label="Log out" destructive action={<ChevronRight className="w-4 h-4 text-destructive" />} onClick={handleLogout} />
+          <Row label="Delete account" destructive action={<ChevronRight className="w-4 h-4 text-destructive/70" />} onClick={handleDeleteAccount} />
         </Section>
 
         <p className="text-center text-xs text-muted-foreground mt-4">VelaGo · v0.1 demo</p>
