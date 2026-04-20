@@ -122,43 +122,6 @@ function resolveOfferRoute(
   return [from, to];
 }
 
-// Static demo conversation shown when there's no live transcript yet,
-// so the chat UI is visible/explorable even without backend.
-const DEMO_CONVERSATION: TranscriptEntry[] = [
-  { id: "d1", type: "text", role: "user", content: "Send a parcel to Berlin tomorrow." },
-  { id: "d2", type: "text", role: "agent", content: "Got it — collecting the details now. You can edit any field below or just keep talking." },
-  {
-    id: "d3",
-    type: "review",
-    title: "Parcel to Berlin — collecting details",
-    rows: [
-      { label: "Destination", value: "Müllerstraße 8, Berlin", empty: false },
-      { label: "Date", value: "Tomorrow", empty: false },
-      { label: "Time", value: "Morning pickup", empty: false },
-      { label: "Weight", value: "—", empty: true },
-    ],
-  },
-  {
-    id: "d4",
-    type: "quote",
-    provider: "DHL Express",
-    price: "8.50",
-    currency: "GBP",
-    route: "London → Berlin",
-    isCheapest: true,
-    name: "Next-day delivery",
-  },
-  {
-    id: "d5",
-    type: "quote",
-    provider: "DPD Classic",
-    price: "11.20",
-    currency: "GBP",
-    route: "London → Berlin",
-    isCheapest: false,
-    name: "2-day delivery",
-  },
-];
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -174,7 +137,6 @@ export default function Voice() {
   const [isTyping, setIsTyping] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-  const [showDemo, setShowDemo] = useState(true);
 
   // Imperative refs — Web Audio + WebSocket (no re-render needed)
   const wsRef = useRef<WebSocket | null>(null);
@@ -288,7 +250,6 @@ export default function Voice() {
 
   // ── Events ───────────────────────────────────────────────────────────────
   function pushEntry(entry: TranscriptEntry) {
-    setShowDemo(false);
     setIsTyping(false);
     setTranscript((prev) => [...prev, entry]);
   }
@@ -438,7 +399,6 @@ export default function Voice() {
 
   function startSession() {
     const token = getAccessToken();
-    setShowDemo(false);
     setTranscript([]);
     const plan = userStore.get()?.plan;
     connect(plan === "pro" && token ? token : null);
@@ -541,8 +501,7 @@ export default function Voice() {
   }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────
-  const visibleEntries: TranscriptEntry[] = transcript.length === 0 && showDemo ? DEMO_CONVERSATION : transcript;
-  const isEmptyHero = visibleEntries.length === 0 && !isTyping;
+  const isIdle = transcript.length === 0 && !isTyping && status === "disconnected";
 
   const rightSlot = (
     <button
@@ -558,24 +517,19 @@ export default function Voice() {
   return (
     <AppLayout rightSlot={rightSlot}>
       <div className="flex flex-col w-full max-w-3xl mx-auto px-4 md:px-8 pt-4 pb-4 overflow-hidden h-[calc(100dvh-56px-64px)] md:h-[calc(100dvh-60px)]">
-        {/* Hero (only when empty) */}
-        {isEmptyHero && (
-          <div className="text-center pt-6 pb-2 vg-fade-up">
-            <h1 className="font-display text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-foreground">
-              Stop searching.
-              <br />
-              <span className="text-primary-gradient">Just say it.</span>
-            </h1>
-            <p className="mt-4 text-base md:text-lg text-muted-foreground max-w-lg mx-auto">
-              Book food, flights, or parcel deliveries — in seconds.
+        {/* Empty state */}
+        {isIdle && (
+          <div className="flex-1 flex items-center justify-center vg-fade-up">
+            <p className="text-center text-lg md:text-xl text-muted-foreground font-medium max-w-sm">
+              Tell me what you need — a flight, a delivery, a dinner reservation. I'll handle the rest.
             </p>
           </div>
         )}
 
         {/* Chat thread */}
-        {!isEmptyHero && (
+        {!isIdle && (
           <div className="flex-1 min-h-0 overflow-y-auto py-4 flex flex-col gap-3">
-            {visibleEntries.map((entry, i) => (
+            {transcript.map((entry, i) => (
               <Bubble key={entry.id} entry={entry} index={i} />
             ))}
             {isTyping && <TypingDots />}
