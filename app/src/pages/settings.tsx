@@ -45,10 +45,12 @@ function Row({
   );
 }
 
-function InlineEdit({
+function EditableRow({
+  label,
   value,
   onSave,
 }: {
+  label: string;
   value: string;
   onSave: (v: string) => Promise<void>;
 }) {
@@ -57,17 +59,6 @@ function InlineEdit({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { setDraft(value); }, [value]);
-
-  if (!editing) {
-    return (
-      <button
-        className="p-2 rounded-full hover:bg-muted text-muted-foreground"
-        onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-      >
-        <Pencil className="w-4 h-4" />
-      </button>
-    );
-  }
 
   const submit = async () => {
     if (draft === value) { setEditing(false); return; }
@@ -79,21 +70,38 @@ function InlineEdit({
   };
 
   return (
-    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-      <input
-        autoFocus
-        className="border border-border rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary/40"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setEditing(false); }}
-        disabled={saving}
-      />
-      <button className="p-1 rounded hover:bg-muted text-primary" onClick={submit} disabled={saving}>
-        <Check className="w-4 h-4" />
-      </button>
-      <button className="p-1 rounded hover:bg-muted text-muted-foreground" onClick={() => setEditing(false)} disabled={saving}>
-        <X className="w-4 h-4" />
-      </button>
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-foreground">{label}</div>
+        {editing ? (
+          <div className="flex items-center gap-1 mt-1">
+            <input
+              autoFocus
+              className="flex-1 min-w-0 border border-border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setEditing(false); }}
+              disabled={saving}
+            />
+            <button className="p-1 rounded hover:bg-muted text-primary shrink-0" onClick={submit} disabled={saving}>
+              <Check className="w-4 h-4" />
+            </button>
+            <button className="p-1 rounded hover:bg-muted text-muted-foreground shrink-0" onClick={() => setEditing(false)} disabled={saving}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground mt-0.5 truncate">{value || "—"}</div>
+        )}
+      </div>
+      {!editing && (
+        <button
+          className="p-2 rounded-full hover:bg-muted text-muted-foreground shrink-0"
+          onClick={() => setEditing(true)}
+        >
+          <Pencil className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -170,13 +178,17 @@ export default function Settings() {
 
   const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || profile?.name || "";
 
-  // Parse default address from profile
-  const defaultAddr = profile?.saved_addresses?.default as
-    | { address?: string; city?: string; postcode?: string; country?: string }
-    | undefined;
-  const defaultAddrStr = defaultAddr
-    ? [defaultAddr.address, defaultAddr.city, defaultAddr.postcode, defaultAddr.country].filter(Boolean).join(", ")
-    : "";
+  // Default address from profile
+  const defaultAddr = (profile?.saved_addresses?.default ?? {}) as
+    { address?: string; city?: string; postcode?: string; country?: string };
+
+  const patchAddress = async (field: string, value: string) => {
+    const updated = {
+      ...profile?.saved_addresses,
+      default: { ...defaultAddr, [field]: value },
+    };
+    await patchField({ saved_addresses: updated });
+  };
 
   return (
     <AppLayout>
@@ -198,60 +210,23 @@ export default function Settings() {
         </Section>
 
         <Section title="Account">
-          <Row
-            label="Email"
-            value={profile?.email ?? "—"}
-            action={<InlineEdit value={profile?.email ?? ""} onSave={(v) => patchField({ email: v })} />}
-          />
-          <Row
+          <EditableRow label="Email" value={profile?.email ?? ""} onSave={(v) => patchField({ email: v })} />
+          <EditableRow
             label="Full name"
-            value={fullName || "—"}
-            action={
-              <InlineEdit
-                value={fullName}
-                onSave={async (v) => {
-                  const parts = v.trim().split(/\s+/);
-                  const first_name = parts[0] ?? "";
-                  const last_name = parts.slice(1).join(" ");
-                  await patchField({ first_name, last_name });
-                }}
-              />
-            }
+            value={fullName}
+            onSave={async (v) => {
+              const parts = v.trim().split(/\s+/);
+              await patchField({ first_name: parts[0] ?? "", last_name: parts.slice(1).join(" ") });
+            }}
           />
-          <Row
-            label="Phone"
-            value={profile?.phone ?? profile?.phone_number ?? "—"}
-            action={<InlineEdit value={profile?.phone ?? profile?.phone_number ?? ""} onSave={(v) => patchField({ phone: v })} />}
-          />
+          <EditableRow label="Phone" value={profile?.phone ?? profile?.phone_number ?? ""} onSave={(v) => patchField({ phone: v })} />
         </Section>
 
         <Section title="Default address">
-          {defaultAddrStr ? (
-            <Row
-              label="Address"
-              value={defaultAddrStr}
-              action={
-                <InlineEdit
-                  value={defaultAddrStr}
-                  onSave={async (v) => {
-                    const parts = v.split(",").map((s) => s.trim());
-                    const updated = {
-                      ...profile?.saved_addresses,
-                      default: {
-                        address: parts[0] ?? "",
-                        city: parts[1] ?? "",
-                        postcode: parts[2] ?? "",
-                        country: parts[3] ?? "",
-                      },
-                    };
-                    await patchField({ saved_addresses: updated });
-                  }}
-                />
-              }
-            />
-          ) : (
-            <Row label="" value={<span className="text-muted-foreground text-xs">No saved address</span>} />
-          )}
+          <EditableRow label="Street" value={defaultAddr.address ?? ""} onSave={(v) => patchAddress("address", v)} />
+          <EditableRow label="City" value={defaultAddr.city ?? ""} onSave={(v) => patchAddress("city", v)} />
+          <EditableRow label="Postcode" value={defaultAddr.postcode ?? ""} onSave={(v) => patchAddress("postcode", v)} />
+          <EditableRow label="Country" value={defaultAddr.country ?? ""} onSave={(v) => patchAddress("country", v)} />
         </Section>
 
         <Section title="Preferences">
