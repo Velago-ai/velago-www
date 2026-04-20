@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useLocation } from "wouter";
-import { Mic, MicOff, Send, LogOut, Wifi, WifiOff } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Mic, MicOff, Send, Info, User2, CheckCircle2, Pencil } from "lucide-react";
+import { AppLayout } from "@/components/app-layout";
 import { getAccessToken, clearTokens } from "@/lib/auth";
-import { fetchMe, signOut, updateMe } from "@/lib/api-auth";
+import { fetchMe, signOut } from "@/lib/api-auth";
 import { userStore, useProfile } from "@/lib/user-store";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
 
@@ -22,7 +17,7 @@ const ALLOW_BARGE_IN = false;
 const MIN_PLAYBACK_SAMPLES = 4800;
 const FLUSH_DELAY_MS = 120;
 const LOGO_FILTER =
-  "brightness(0) saturate(100%) invert(18%) sepia(90%) saturate(2500%) hue-rotate(220deg) brightness(95%) contrast(95%)";
+  "brightness(0) saturate(100%) invert(28%) sepia(98%) saturate(3500%) hue-rotate(228deg) brightness(98%) contrast(101%)";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,77 +64,27 @@ type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry;
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SENDER_FIELDS: [string, string][] = [
-  ["sender_name", "Full Name"],
+  ["sender_name", "Full name"],
   ["sender_phone", "Phone"],
   ["sender_email", "Email"],
   ["sender_address", "Address"],
   ["sender_city", "City"],
-  ["sender_postcode", "Postal Code"],
+  ["sender_postcode", "Postal code"],
 ];
 const RECEIVER_FIELDS: [string, string][] = [
-  ["receiver_name", "Full Name"],
+  ["receiver_name", "Full name"],
   ["receiver_phone", "Phone"],
   ["receiver_email", "Email"],
   ["receiver_address", "Address"],
   ["receiver_city", "City"],
-  ["receiver_postcode", "Postal Code"],
+  ["receiver_postcode", "Postal code"],
 ];
 const PASSENGER_FIELDS: [string, string][] = [
-  ["first_name", "First Name"],
-  ["last_name", "Last Name"],
+  ["first_name", "First name"],
+  ["last_name", "Last name"],
   ["email", "Email"],
   ["phone", "Phone"],
 ];
-
-function pickAddress(saved: Record<string, unknown> | null | undefined) {
-  if (!saved || typeof saved !== "object") return null;
-  const keys = ["default", "home", "sender", "shipping", "billing", "primary"];
-  for (const key of keys) {
-    const v = (saved as Record<string, unknown>)[key];
-    if (v && typeof v === "object") return v as Record<string, string>;
-    if (typeof v === "string" && v.trim()) return { address: v };
-  }
-  const values = Object.values(saved);
-  for (const v of values) {
-    if (v && typeof v === "object") return v as Record<string, string>;
-    if (typeof v === "string" && (v as string).trim())
-      return { address: v as string };
-  }
-  return null;
-}
-
-function getAddressForForm(saved: Record<string, unknown> | null | undefined) {
-  if (!saved) return { address: "", city: "", postcode: "" };
-  // flat object (e.g. from PATCH response)
-  if (typeof saved.address === "string" || typeof saved.city === "string") {
-    return {
-      address: String(saved.address ?? ""),
-      city: String(saved.city ?? ""),
-      postcode: String(saved.postcode ?? saved.zip ?? ""),
-    };
-  }
-  // nested
-  const addr = pickAddress(saved);
-  return {
-    address: String(addr?.address ?? ""),
-    city: String(addr?.city ?? ""),
-    postcode: String(addr?.postcode ?? addr?.zip ?? ""),
-  };
-}
-
-function formatUserName(p: ReturnType<typeof userStore.get>): string {
-  if (!p) return "";
-  const parts = [p.title, p.first_name ?? p.given_name, p.last_name ?? p.family_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return parts || p.name || p.email || "";
-}
-
-function planLabel(plan: string | undefined): string {
-  if (plan === "pro") return "Pro";
-  return "Demo";
-}
 
 function extractFlightCodes(value: string): string[] {
   return (
@@ -177,6 +122,44 @@ function resolveOfferRoute(
   return [from, to];
 }
 
+// Static demo conversation shown when there's no live transcript yet,
+// so the chat UI is visible/explorable even without backend.
+const DEMO_CONVERSATION: TranscriptEntry[] = [
+  { id: "d1", type: "text", role: "user", content: "Send a parcel to Berlin tomorrow." },
+  { id: "d2", type: "text", role: "agent", content: "Got it — collecting the details now. You can edit any field below or just keep talking." },
+  {
+    id: "d3",
+    type: "review",
+    title: "Parcel to Berlin — collecting details",
+    rows: [
+      { label: "Destination", value: "Müllerstraße 8, Berlin", empty: false },
+      { label: "Date", value: "Tomorrow", empty: false },
+      { label: "Time", value: "Morning pickup", empty: false },
+      { label: "Weight", value: "—", empty: true },
+    ],
+  },
+  {
+    id: "d4",
+    type: "quote",
+    provider: "DHL Express",
+    price: "8.50",
+    currency: "GBP",
+    route: "London → Berlin",
+    isCheapest: true,
+    name: "Next-day delivery",
+  },
+  {
+    id: "d5",
+    type: "quote",
+    provider: "DPD Classic",
+    price: "11.20",
+    currency: "GBP",
+    route: "London → Berlin",
+    isCheapest: false,
+    name: "2-day delivery",
+  },
+];
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Voice() {
@@ -191,20 +174,7 @@ export default function Voice() {
   const [isTyping, setIsTyping] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-
-  // Profile modal
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [formTitle, setFormTitle] = useState("Mr");
-  const [formFirst, setFormFirst] = useState("");
-  const [formLast, setFormLast] = useState("");
-  const [formEmail, setFormEmail] = useState("");
-  const [formPhone, setFormPhone] = useState("");
-  const [formAddress, setFormAddress] = useState("");
-  const [formCity, setFormCity] = useState("");
-  const [formPostcode, setFormPostcode] = useState("");
-  const [updating, setUpdating] = useState(false);
-  const [updateError, setUpdateError] = useState<string | null>(null);
-  const [updateSuccess, setUpdateSuccess] = useState(false);
+  const [showDemo, setShowDemo] = useState(true);
 
   // Imperative refs — Web Audio + WebSocket (no re-render needed)
   const wsRef = useRef<WebSocket | null>(null);
@@ -223,12 +193,10 @@ export default function Voice() {
 
   function nextId() { return String(++idCounterRef.current); }
 
-  // ── Auth guard + profile load ────────────────────────────────────────────
-
+  // ── Auth load (best-effort) ──────────────────────────────────────────────
   useEffect(() => {
     const token = getAccessToken();
-    if (!token) { setLocation("/auth"); return; }
-    fetchMe(token).then((p) => userStore.set(p)).catch(() => null);
+    if (token) fetchMe(token).then((p) => userStore.set(p)).catch(() => null);
     return () => { wsRef.current?.close(1000); };
   }, []);
 
@@ -236,62 +204,6 @@ export default function Voice() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript, isTyping]);
-
-  // ── Profile modal helpers ────────────────────────────────────────────────
-
-  function openProfile() {
-    const p = userStore.get();
-    setFormTitle(p?.title ?? "Mr.");
-    setFormFirst(p?.first_name ?? p?.given_name ?? "");
-    setFormLast(p?.last_name ?? p?.family_name ?? "");
-    setFormEmail(p?.email ?? "");
-    setFormPhone(p?.phone ?? p?.phone_number ?? "");
-    const addr = getAddressForForm(p?.saved_addresses);
-    setFormAddress(addr.address);
-    setFormCity(addr.city);
-    setFormPostcode(addr.postcode);
-    setUpdateError(null);
-    setUpdateSuccess(false);
-    setProfileOpen(true);
-  }
-
-  async function handleUpdate() {
-    const token = getAccessToken();
-    if (!token) return;
-
-    const allFilled = [formTitle, formFirst, formLast, formEmail, formPhone, formAddress, formCity, formPostcode]
-      .every((v) => v.trim() !== "");
-
-    if (!allFilled) {
-      setUpdateError("Please fill in all fields to activate your Pro plan.");
-      return;
-    }
-
-    setUpdating(true);
-    setUpdateError(null);
-    setUpdateSuccess(false);
-    try {
-      const updated = await updateMe(token, {
-        title: formTitle,
-        first_name: formFirst,
-        last_name: formLast,
-        email: formEmail,
-        phone: formPhone,
-        plan: "pro",
-        saved_addresses: {
-          address: formAddress,
-          city: formCity,
-          postcode: formPostcode,
-        },
-      });
-      userStore.set(updated);
-      setUpdateSuccess(true);
-    } catch (err) {
-      setUpdateError((err as Error).message);
-    } finally {
-      setUpdating(false);
-    }
-  }
 
   // ── Playback ─────────────────────────────────────────────────────────────
 
@@ -301,7 +213,6 @@ export default function Voice() {
     if (playbackCursorRef.current < playCtxRef.current.currentTime)
       playbackCursorRef.current = playCtxRef.current.currentTime;
   }
-
   async function primePlayback() {
     await ensurePlayback();
     if (!playCtxRef.current) return;
@@ -309,7 +220,6 @@ export default function Voice() {
     const s = playCtxRef.current.createBufferSource();
     s.buffer = b; s.connect(playCtxRef.current.destination); s.start(0);
   }
-
   async function scheduleBuffer(int16: Int16Array) {
     await ensurePlayback();
     if (!playCtxRef.current) return;
@@ -324,7 +234,6 @@ export default function Voice() {
     playbackCursorRef.current = startAt + buf.duration;
     src.start(startAt);
   }
-
   function schedulePending() {
     if (pendingSamplesRef.current === 0) return;
     if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
@@ -335,7 +244,6 @@ export default function Voice() {
     pendingSamplesRef.current = 0;
     void scheduleBuffer(merged);
   }
-
   function handleAudio(ab: ArrayBuffer) {
     const samples = ab.byteLength / 2;
     const durationMs = (samples / PLAYBACK_RATE) * 1000;
@@ -346,7 +254,6 @@ export default function Voice() {
     flushTimerRef.current = setTimeout(schedulePending, FLUSH_DELAY_MS);
     if (pendingSamplesRef.current >= MIN_PLAYBACK_SAMPLES) schedulePending();
   }
-
   function resetPlayback() {
     if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
     pendingInt16Ref.current = [];
@@ -357,47 +264,37 @@ export default function Voice() {
   }
 
   // ── WebSocket ────────────────────────────────────────────────────────────
-
   function connect(token: string | null) {
     void primePlayback();
     setStatus("connecting");
-    // Only send token for pro plan; free/demo connects anonymously
     const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
-
-    ws.onopen = () => {
-      setStatus("connected");
-      setIsTyping(true);
-    };
-
+    ws.onopen = () => { setStatus("connected"); setIsTyping(true); };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) { handleAudio(e.data); return; }
       if (e.data instanceof Blob) { void e.data.arrayBuffer().then(handleAudio); return; }
-      try { handleEvent(JSON.parse(e.data as string)); } catch { /* ignore parse errors */ }
+      try { handleEvent(JSON.parse(e.data as string)); } catch { /* ignore */ }
     };
-
     ws.onclose = (e) => {
       setStatus(e.code === 1000 ? "disconnected" : "error");
       setIsTyping(false);
       stopRecording();
       resetPlayback();
     };
-
     ws.onerror = () => setStatus("error");
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
-
   function pushEntry(entry: TranscriptEntry) {
+    setShowDemo(false);
     setIsTyping(false);
     setTranscript((prev) => [...prev, entry]);
   }
 
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? "");
-
     if (t === "ConversationText") {
       pushEntry({
         id: nextId(),
@@ -407,23 +304,16 @@ export default function Voice() {
       });
       return;
     }
-
     if (t === "AgentThinking" || t === "FunctionCallRequest" || t === "BookingFieldsProgress") {
       setIsTyping(true);
       return;
     }
-
     if (t === "AgentAudioDone") {
       agentSpeakingUntilRef.current = Math.max(agentSpeakingUntilRef.current, Date.now() + 250);
       setIsTyping(false);
       return;
     }
-
-    if (t === "UserStartedSpeaking") {
-      setIsTyping(false);
-      return;
-    }
-
+    if (t === "UserStartedSpeaking") { setIsTyping(false); return; }
     if (t === "QuoteReady") {
       setIsTyping(false);
       const allOffers = (msg.all_offers as unknown[]) ?? [];
@@ -439,22 +329,21 @@ export default function Voice() {
       }
       return;
     }
-
     if (t === "SenderReview") {
       setIsTyping(false);
-      const entry = buildReviewEntry("Sender Details", msg.collected_sender as Record<string, string>, SENDER_FIELDS);
+      const entry = buildReviewEntry("Sender details", msg.collected_sender as Record<string, string>, SENDER_FIELDS);
       if (entry) pushEntry(entry);
       return;
     }
     if (t === "ReceiverReview") {
       setIsTyping(false);
-      const entry = buildReviewEntry("Receiver Details", msg.collected_receiver as Record<string, string>, RECEIVER_FIELDS);
+      const entry = buildReviewEntry("Receiver details", msg.collected_receiver as Record<string, string>, RECEIVER_FIELDS);
       if (entry) pushEntry(entry);
       return;
     }
     if (t === "PassengerReview") {
       setIsTyping(false);
-      const entry = buildReviewEntry("Passenger Details", msg.collected_passenger as Record<string, string>, PASSENGER_FIELDS);
+      const entry = buildReviewEntry("Passenger details", msg.collected_passenger as Record<string, string>, PASSENGER_FIELDS);
       if (entry) pushEntry(entry);
       return;
     }
@@ -471,7 +360,6 @@ export default function Voice() {
       }
       return;
     }
-
     if (t === "BookingConfirmed") {
       setIsTyping(false);
       pushEntry({
@@ -483,7 +371,6 @@ export default function Voice() {
       });
       return;
     }
-
     setIsTyping(true);
   }, []);
 
@@ -514,15 +401,11 @@ export default function Voice() {
       : [];
     const flightCodes = collectUniqueFlightCodes(rawSegments);
     const summaryCodes = collectUniqueFlightCodes([
-      offer.name as string,
-      offer.summary as string,
-      offer.description as string,
-      offer.flight_info as string,
+      offer.name as string, offer.summary as string, offer.description as string, offer.flight_info as string,
     ]);
     const displayCodes = flightCodes.length ? flightCodes : summaryCodes;
     const [from, to] = resolveOfferRoute(offer, ext);
     const route = displayCodes.length ? displayCodes.join(" / ") : `${from} → ${to}`;
-
     const flightInfo = String(offer.flight_info ?? offer.description ?? "");
     let fareName = "";
     let fareIncludes = "";
@@ -539,15 +422,13 @@ export default function Voice() {
       else if (k === "fare") fareName = v;
       else if (k === "includes") fareIncludes = v;
     }
-
     return {
       id: nextId(),
       type: "quote",
       provider: String(offer.provider ?? ""),
       price: offer.price != null ? Number(offer.price).toFixed(2) : "—",
       currency: String(offer.currency ?? "EUR"),
-      route,
-      isCheapest,
+      route, isCheapest,
       name: offer.name ? String(offer.name) : undefined,
       flightInfo: infoItems.length ? infoItems.join("  •  ") : undefined,
       fareName: fareName || undefined,
@@ -555,19 +436,15 @@ export default function Voice() {
     };
   }
 
-  // ── Session start ────────────────────────────────────────────────────────
-
   function startSession() {
     const token = getAccessToken();
-    if (!token) { setLocation("/auth"); return; }
+    setShowDemo(false);
     setTranscript([]);
-    // Send token only for pro plan; anonymous WS for free/demo
     const plan = userStore.get()?.plan;
-    connect(plan === "pro" ? token : null);
+    connect(plan === "pro" && token ? token : null);
   }
 
   // ── Mic ──────────────────────────────────────────────────────────────────
-
   async function startRecording() {
     try {
       await ensurePlayback();
@@ -581,7 +458,6 @@ export default function Voice() {
       gain.gain.value = INPUT_GAIN;
       const mute = audioCtxRef.current.createGain();
       mute.gain.value = 0;
-
       proc.onaudioprocess = (ev) => {
         if (!isRecordingRef.current || !wsRef.current || wsRef.current.readyState !== 1) return;
         if (!ALLOW_BARGE_IN && Date.now() < agentSpeakingUntilRef.current) return;
@@ -593,20 +469,14 @@ export default function Voice() {
         }
         wsRef.current.send(i16.buffer);
       };
-
-      src.connect(gain);
-      gain.connect(proc);
-      proc.connect(mute);
-      mute.connect(audioCtxRef.current.destination);
+      src.connect(gain); gain.connect(proc); proc.connect(mute); mute.connect(audioCtxRef.current.destination);
       processorRef.current = proc;
-
       isRecordingRef.current = true;
       setIsRecording(true);
     } catch {
       pushEntry({ id: nextId(), type: "text", role: "agent", content: "⚠ Mic access denied" });
     }
   }
-
   function stopRecording() {
     isRecordingRef.current = false;
     setIsRecording(false);
@@ -614,24 +484,44 @@ export default function Voice() {
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop()); mediaStreamRef.current = null;
     audioCtxRef.current?.close(); audioCtxRef.current = null;
   }
-
   function toggleMic() {
-    if (!wsRef.current || wsRef.current.readyState !== 1) return;
+    if (!wsRef.current || wsRef.current.readyState !== 1) {
+      startSession();
+      // Auto-start mic once connected
+      const tryStart = () => {
+        if (wsRef.current?.readyState === 1) void startRecording();
+        else setTimeout(tryStart, 200);
+      };
+      setTimeout(tryStart, 250);
+      return;
+    }
     if (isRecording) stopRecording(); else void startRecording();
   }
-
-  // ── Text send ────────────────────────────────────────────────────────────
 
   function sendText(e: React.FormEvent) {
     e.preventDefault();
     const text = textInput.trim();
-    if (!text || !wsRef.current || wsRef.current.readyState !== 1) return;
+    if (!text) return;
+    if (!wsRef.current || wsRef.current.readyState !== 1) {
+      // Show as a local demo bubble so the UI is responsive even offline
+      pushEntry({ id: nextId(), type: "text", role: "user", content: text });
+      setTextInput("");
+      setIsTyping(true);
+      setTimeout(() => {
+        pushEntry({
+          id: nextId(),
+          type: "text",
+          role: "agent",
+          content: "Connect to start a session — tap the mic to begin.",
+        });
+      }, 600);
+      return;
+    }
     wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
+    pushEntry({ id: nextId(), type: "text", role: "user", content: text });
     setTextInput("");
     setIsTyping(true);
   }
-
-  // ── Logout ───────────────────────────────────────────────────────────────
 
   async function handleLogout() {
     const token = getAccessToken();
@@ -639,10 +529,8 @@ export default function Voice() {
     if (token) await signOut(token).catch(() => null);
     clearTokens();
     userStore.set(null);
-    setLocation("/auth");
+    setLocation("/");
   }
-
-  // ── Keepalive ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -653,347 +541,251 @@ export default function Voice() {
   }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────
+  const visibleEntries: TranscriptEntry[] = transcript.length === 0 && showDemo ? DEMO_CONVERSATION : transcript;
+  const isEmptyHero = visibleEntries.length === 0 && !isTyping;
 
-  const isConnected = status === "connected";
-  const plan = planLabel(profile?.plan);
-  const isPro = profile?.plan === "pro";
+  const rightSlot = (
+    <button
+      onClick={() => setLocation("/settings")}
+      className="w-9 h-9 rounded-full bg-secondary border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+      aria-label="Account"
+      title={profile ? (profile.email ?? "Account") : "Account"}
+    >
+      <User2 className="w-4 h-4" />
+    </button>
+  );
 
   return (
-    <div className="min-h-[100dvh] flex flex-col bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-border px-6 py-4 flex items-center gap-3">
-        <img src={velagoLogo} alt="VelaGo" className="h-10 object-contain shrink-0" style={{ filter: LOGO_FILTER }} />
-
-        {/* Profile pill button */}
-        <div className="flex-1 min-w-0">
-          {profile && (
-            <button
-              onClick={openProfile}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/5 hover:bg-black/10 border border-black/10 transition-colors text-left max-w-full"
-            >
-              <span className="text-sm font-medium text-foreground truncate">
-                {formatUserName(profile)}
-              </span>
-              <span
-                className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  isPro
-                    ? "bg-primary/15 text-primary"
-                    : "bg-muted-foreground/15 text-muted-foreground"
-                }`}
-              >
-                {plan}
-              </span>
-            </button>
-          )}
-        </div>
-
-        {/* Status + logout */}
-        <div className="flex items-center gap-2 shrink-0">
-          {isConnected ? (
-            <Wifi className="w-4 h-4 text-green-500" />
-          ) : (
-            <WifiOff className="w-4 h-4 text-muted-foreground" />
-          )}
-          <span className="text-xs text-muted-foreground hidden sm:inline">
-            {status === "connected" ? "Connected" : status === "connecting" ? "Connecting…" : status === "error" ? "Error" : "Disconnected"}
-          </span>
-          <Button variant="ghost" size="icon" onClick={handleLogout} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-            <LogOut className="w-4 h-4" />
-          </Button>
-        </div>
-      </header>
-
-      {/* Profile Sheet */}
-      <Sheet open={profileOpen} onOpenChange={setProfileOpen}>
-        <SheetContent side="left" className="w-80 sm:w-96 flex flex-col">
-          <SheetHeader>
-            <SheetTitle>Account</SheetTitle>
-          </SheetHeader>
-
-          <Tabs defaultValue="details" className="flex-1 overflow-y-auto mt-2">
-            <TabsList className="w-full">
-              <TabsTrigger value="details" className="flex-1">User details</TabsTrigger>
-              <TabsTrigger value="payment" className="flex-1">Payment methods</TabsTrigger>
-            </TabsList>
-
-            {/* ── User details ── */}
-            <TabsContent value="details" className="mt-4 flex flex-col gap-4 pb-4">
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Title</Label>
-                <Select value={formTitle} onValueChange={setFormTitle}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Mr.">Mr.</SelectItem>
-                    <SelectItem value="Ms.">Ms.</SelectItem>
-                    <SelectItem value="Mrs.">Mrs.</SelectItem>
-                    <SelectItem value="Mx.">Mx.</SelectItem>
-                    <SelectItem value="Dr.">Dr.</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">First name</Label>
-                  <Input value={formFirst} onChange={(e) => setFormFirst(e.target.value)} autoComplete="given-name" />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">Last name</Label>
-                  <Input value={formLast} onChange={(e) => setFormLast(e.target.value)} autoComplete="family-name" />
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Email</Label>
-                <Input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)} autoComplete="email" />
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Phone</Label>
-                <Input type="tel" value={formPhone} onChange={(e) => setFormPhone(e.target.value)} autoComplete="tel" />
-              </div>
-
-              <hr className="border-border" />
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide -mb-2">
-                Delivery address
-              </p>
-
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1 block">Street address</Label>
-                <Input value={formAddress} onChange={(e) => setFormAddress(e.target.value)} autoComplete="street-address" />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">City</Label>
-                  <Input value={formCity} onChange={(e) => setFormCity(e.target.value)} autoComplete="address-level2" />
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground mb-1 block">ZIP / Postcode</Label>
-                  <Input value={formPostcode} onChange={(e) => setFormPostcode(e.target.value)} autoComplete="postal-code" />
-                </div>
-              </div>
-
-              {updateError && <p className="text-sm text-destructive">{updateError}</p>}
-              {updateSuccess && <p className="text-sm text-green-600">Saved successfully</p>}
-
-              <Button
-                onClick={handleUpdate}
-                disabled={updating}
-                className="rounded-full bg-primary-gradient text-white border-0 h-10"
-              >
-                {updating ? "Saving…" : "Update"}
-              </Button>
-            </TabsContent>
-
-            {/* ── Payment methods ── */}
-            <TabsContent value="payment" className="mt-4 flex flex-col gap-4">
-              <p className="text-sm text-muted-foreground">
-                Connect your payment method to book and pay for orders seamlessly.
-              </p>
-              <Button variant="outline" className="rounded-full" disabled>
-                Connect to Revolut
-              </Button>
-            </TabsContent>
-          </Tabs>
-        </SheetContent>
-      </Sheet>
-
-      {/* Mic area */}
-      <div className="flex flex-col items-center py-8 px-4">
-        {status === "disconnected" || status === "error" ? (
-          <>
-            <button
-              onClick={startSession}
-              className="relative z-10 flex items-center justify-center w-24 h-24 rounded-full bg-primary-gradient text-white shadow-xl hover:scale-105 transition-transform duration-300"
-              aria-label="Start new session"
-            >
-              <Mic className="w-9 h-9" />
-            </button>
-            <span className="text-sm text-muted-foreground mt-3">
-              {status === "error" ? "Connection error — " : ""}Start new session
-            </span>
-          </>
-        ) : (
-          <>
-            <div className="relative group mb-3">
-              <button
-                onClick={toggleMic}
-                disabled={!isConnected}
-                className={`relative z-10 flex items-center justify-center w-24 h-24 rounded-full text-white transition-all duration-300 shadow-xl
-                  ${isConnected ? "bg-primary-gradient" : "bg-muted cursor-not-allowed"}
-                  ${isRecording ? "scale-105 animate-breathing" : isConnected ? "hover:scale-105" : ""}
-                `}
-                aria-label="Tap to talk"
-              >
-                {isRecording ? <MicOff className="w-9 h-9" /> : <Mic className="w-9 h-9" />}
-              </button>
-              {isConnected && (
-                <div className="absolute inset-0 rounded-full bg-primary/20 blur-2xl -z-10 scale-150 group-hover:bg-primary/30 transition-colors" />
-              )}
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {status === "connecting"
-                ? "Connecting…"
-                : isRecording
-                ? "Listening… tap to stop"
-                : "Tap to speak"}
-            </span>
-          </>
-        )}
-      </div>
-
-      {/* Transcript */}
-      <div className="flex-1 px-4 pb-4 max-w-xl w-full mx-auto flex flex-col gap-2 min-h-0">
-        <div className="flex-1 bg-white rounded-3xl border border-border overflow-y-auto p-4 flex flex-col gap-2 min-h-[200px] max-h-[50vh]">
-          {transcript.length === 0 && !isTyping && (
-            <p className="text-center text-sm text-muted-foreground py-8">
-              {status === "disconnected" || status === "error"
-                ? "Press Start new session to begin"
-                : "Vela is ready — start speaking"}
+    <AppLayout rightSlot={rightSlot}>
+      <div className="flex flex-col w-full max-w-3xl mx-auto px-4 md:px-8 pt-4 pb-4 overflow-hidden h-[calc(100dvh-56px-64px)] md:h-[calc(100dvh-60px)]">
+        {/* Hero (only when empty) */}
+        {isEmptyHero && (
+          <div className="text-center pt-6 pb-2 vg-fade-up">
+            <h1 className="font-display text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.05] text-foreground">
+              Stop searching.
+              <br />
+              <span className="text-primary-gradient">Just say it.</span>
+            </h1>
+            <p className="mt-4 text-base md:text-lg text-muted-foreground max-w-lg mx-auto">
+              Book food, flights, or parcel deliveries — in seconds.
             </p>
-          )}
+          </div>
+        )}
 
-          {transcript.map((entry) => {
-            if (entry.type === "text") {
-              return (
-                <div key={entry.id} className="text-sm leading-relaxed">
-                  <span
-                    className={`font-semibold text-xs uppercase tracking-wide mr-2 ${
-                      entry.role === "user" ? "text-primary" : "text-green-600"
-                    }`}
-                  >
-                    {entry.role === "user" ? "You" : "Vela"}
-                  </span>
-                  {entry.content}
-                </div>
-              );
-            }
+        {/* Chat thread */}
+        {!isEmptyHero && (
+          <div className="flex-1 min-h-0 overflow-y-auto py-4 flex flex-col gap-3">
+            {visibleEntries.map((entry, i) => (
+              <Bubble key={entry.id} entry={entry} index={i} />
+            ))}
+            {isTyping && <TypingDots />}
+            <div ref={transcriptEndRef} />
+          </div>
+        )}
 
-            if (entry.type === "review") {
-              return (
-                <div key={entry.id} className="rounded-2xl bg-amber-50 border border-amber-200 p-4">
-                  <p className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">
-                    {entry.title}
-                  </p>
-                  {entry.rows.map((row) => (
-                    <div key={row.label} className="flex gap-2 py-1 border-b border-amber-100 last:border-0 text-sm">
-                      <span className="min-w-[80px] text-xs font-semibold text-amber-600 uppercase tracking-wide shrink-0">
-                        {row.label}
-                      </span>
-                      <span className={row.empty ? "text-amber-400 italic" : "text-amber-900 font-medium"}>
-                        {row.value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              );
-            }
-
-            if (entry.type === "quote") {
-              return (
-                <div
-                  key={entry.id}
-                  className={`rounded-2xl p-4 border ${
-                    entry.isCheapest
-                      ? "bg-primary/5 border-primary/30"
-                      : "bg-muted/30 border-border opacity-80"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className={`text-xs font-bold uppercase tracking-wider ${
-                        entry.isCheapest ? "text-primary" : "text-muted-foreground"
-                      }`}
-                    >
-                      {entry.provider}
-                    </span>
-                    {entry.isCheapest && (
-                      <span className="text-[10px] font-bold bg-primary text-white px-2 py-0.5 rounded-full">
-                        Best price
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-2xl font-bold text-foreground">
-                    {entry.price}{" "}
-                    <span className="text-sm font-normal text-muted-foreground">{entry.currency}</span>
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-0.5">{entry.route}</div>
-                  {entry.name && <div className="text-xs text-muted-foreground mt-0.5">{entry.name}</div>}
-                  {entry.flightInfo && <div className="text-xs text-foreground mt-1">{entry.flightInfo}</div>}
-                  {entry.fareName && (
-                    <div className="text-xs font-semibold text-primary uppercase tracking-wide mt-1">
-                      {entry.fareName}
-                    </div>
-                  )}
-                  {entry.fareIncludes && (
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {entry.fareIncludes.split(";").map((s) => s.trim()).filter(Boolean).slice(0, 3).join(" · ")}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
-            if (entry.type === "confirmed") {
-              return (
-                <div key={entry.id} className="rounded-2xl bg-green-50 border border-green-200 p-4">
-                  <div className="text-xs font-bold uppercase tracking-wider text-green-600 mb-1">
-                    ✅ Booking Confirmed
-                  </div>
-                  <div className="text-xl font-bold text-green-900">
-                    {entry.price} {entry.currency}
-                  </div>
-                  {entry.orderId && (
-                    <div className="text-xs text-green-700 mt-0.5 break-all">Order: {entry.orderId}</div>
-                  )}
-                </div>
-              );
-            }
-
-            return null;
-          })}
-
-          {/* Typing indicator */}
-          {isTyping && (
-            <div className="flex items-center gap-2 py-1">
-              <div className="flex gap-1">
-                {[0, 150, 300].map((delay) => (
-                  <span
-                    key={delay}
-                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-                    style={{ animationDelay: `${delay}ms` }}
-                  />
-                ))}
-              </div>
-              <span className="text-xs text-muted-foreground">Vela is typing…</span>
+        {/* Mic + voice notice */}
+        <div className="flex flex-col items-center pt-2 pb-3">
+          <div className="relative">
+            {isRecording && (
+              <>
+                <span className="mic-pulse-ring" />
+                <span className="mic-pulse-ring delay-1" />
+                <span className="mic-pulse-ring delay-2" />
+              </>
+            )}
+            <button
+              onClick={toggleMic}
+              className={`relative z-10 w-20 h-20 rounded-full flex items-center justify-center text-white shadow-lg transition-all duration-300
+                bg-primary hover:scale-105 ${isRecording ? "scale-105" : ""}`}
+              style={{ background: "#3D5AFE" }}
+              aria-label={isRecording ? "Stop recording" : "Tap to talk"}
+            >
+              {isRecording ? <MicOff className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
+            </button>
+          </div>
+          <div className="mt-3 text-sm font-semibold text-foreground">
+            {isRecording ? "Listening…" : status === "connecting" ? "Connecting…" : "Tap to talk"}
+          </div>
+          {isRecording && (
+            <div className="waveform mt-2" aria-hidden>
+              <span /><span /><span /><span /><span />
             </div>
           )}
-
-          <div ref={transcriptEndRef} />
+          {isRecording && (
+            <div className="mt-3 flex items-center gap-2 rounded-full bg-secondary border border-border text-primary text-xs font-medium px-3 py-1.5 max-w-md text-center">
+              <Info className="w-3.5 h-3.5 shrink-0" />
+              Speaking… data appears in chat as you talk. Type to correct any field.
+            </div>
+          )}
         </div>
 
         {/* Text input */}
-        <form onSubmit={sendText} className="flex gap-2">
-          <Input
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            placeholder="Type a message…"
-            disabled={!isConnected}
-            className="rounded-2xl"
-          />
-          <Button
-            type="submit"
-            size="icon"
-            disabled={!isConnected || !textInput.trim()}
-            className="shrink-0 rounded-2xl bg-primary-gradient text-white border-0 w-11 h-11"
-          >
-            <Send className="w-4 h-4" />
-          </Button>
+        <form onSubmit={sendText} className="flex items-center gap-2 mt-1">
+          <div className="relative flex-1">
+            <input
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder='Say: "Send a parcel to Berlin."'
+              className="w-full h-12 pl-5 pr-12 rounded-full bg-white border border-border text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <button
+              type="submit"
+              disabled={!textInput.trim()}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center text-primary hover:bg-primary/10 disabled:opacity-40 disabled:hover:bg-transparent"
+              aria-label="Send"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
         </form>
+
+        {/* Hidden helper kept to preserve Logout flow (used elsewhere if needed) */}
+        <button onClick={handleLogout} className="hidden">logout</button>
+      </div>
+    </AppLayout>
+  );
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+function VelaAvatar() {
+  return (
+    <div
+      className="w-8 h-8 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0"
+      aria-hidden
+    >
+      <img src={velagoLogo} alt="" className="w-5 h-5" style={{ filter: LOGO_FILTER }} />
+    </div>
+  );
+}
+
+function TypingDots() {
+  return (
+    <div className="flex items-center gap-2 px-2">
+      <VelaAvatar />
+      <div className="flex gap-1 bg-white border border-border rounded-2xl rounded-tl-md px-3 py-2.5">
+        {[0, 150, 300].map((d) => (
+          <span
+            key={d}
+            className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
+            style={{ animationDelay: `${d}ms` }}
+          />
+        ))}
       </div>
     </div>
   );
+}
+
+function Bubble({ entry, index }: { entry: TranscriptEntry; index: number }) {
+  const delay = `${Math.min(index, 6) * 50}ms`;
+
+  if (entry.type === "text") {
+    if (entry.role === "user") {
+      return (
+        <div className="flex justify-end vg-fade-up" style={{ animationDelay: delay }}>
+          <div className="max-w-[80%] bg-primary text-white rounded-2xl rounded-tr-md px-4 py-2.5 text-sm leading-relaxed shadow-sm">
+            {entry.content}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-end gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className="max-w-[80%] bg-white border border-border rounded-2xl rounded-tl-md px-4 py-2.5 text-sm leading-relaxed text-foreground">
+          {entry.content}
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "review") {
+    const allFilled = entry.rows.every((r) => !r.empty);
+    return (
+      <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className="vg-card flex-1 p-4">
+          <div className="flex items-start gap-2 mb-3">
+            <div className="font-semibold text-sm text-foreground flex-1">{entry.title}</div>
+            <span className={`vg-chip ${allFilled ? "vg-chip-confirmed" : "vg-chip-info"}`}>
+              {allFilled ? (
+                <>
+                  <CheckCircle2 className="w-3 h-3" /> Ready to confirm
+                </>
+              ) : (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" /> Collecting via voice…
+                </>
+              )}
+            </span>
+          </div>
+          <div className="divide-y divide-border">
+            {entry.rows.map((r) => (
+              <div key={r.label} className="flex items-center gap-3 py-2 text-sm">
+                <span className="text-xs uppercase tracking-wide text-muted-foreground font-semibold w-24 shrink-0">
+                  {r.label}
+                </span>
+                <span className={`flex-1 ${r.empty ? "italic text-muted-foreground" : "font-semibold text-foreground"}`}>
+                  {r.empty ? "—" : r.value}
+                </span>
+                <button className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10">
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "quote") {
+    return (
+      <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className={`vg-card flex-1 p-4 ${entry.isCheapest ? "ring-1 ring-primary/30" : ""}`}>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{entry.provider}</div>
+            {entry.isCheapest && <span className="vg-chip vg-chip-confirmed">Cheapest</span>}
+          </div>
+          <div className="flex items-baseline gap-1 mb-1">
+            <span className="text-2xl font-bold text-foreground font-display">{entry.price}</span>
+            <span className="text-sm text-muted-foreground">{entry.currency}</span>
+          </div>
+          <div className="text-sm text-muted-foreground">{entry.route}</div>
+          {entry.name && <div className="text-xs text-muted-foreground mt-0.5">{entry.name}</div>}
+          {entry.flightInfo && <div className="text-xs text-foreground mt-1">{entry.flightInfo}</div>}
+          {entry.fareName && (
+            <div className="text-xs font-semibold text-primary uppercase tracking-wide mt-1">{entry.fareName}</div>
+          )}
+          <div className="mt-3 flex justify-end">
+            <button className="vg-btn-primary py-2 px-5 text-sm">Select</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "confirmed") {
+    return (
+      <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className="vg-card flex-1 p-5 text-center">
+          <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <div className="font-display font-bold text-lg text-foreground">Order confirmed</div>
+          <div className="text-sm text-muted-foreground mt-1">
+            {entry.price} {entry.currency}
+          </div>
+          {entry.orderId && (
+            <div className="text-xs text-muted-foreground mt-1 break-all">Reference: {entry.orderId}</div>
+          )}
+          <button className="vg-btn-primary mt-4 text-sm">Track order</button>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }

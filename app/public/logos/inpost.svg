@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60">
-  <rect width="200" height="60" rx="8" fill="#FFCD00"/>
-  <text x="100" y="42" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="30" fill="#333" letter-spacing="1">InPost</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80" viewBox="0 0 240 80">
+  <rect width="240" height="80" rx="16" fill="#FFCC00"/>
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-size="32" fill="#000000">
+    InPost
+  </text>
 </svg>
