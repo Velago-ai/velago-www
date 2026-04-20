@@ -222,7 +222,7 @@ export default function Settings() {
           <EditableRow label="Phone" value={profile?.phone ?? profile?.phone_number ?? ""} onSave={(v) => patchField({ phone: v })} />
           <Row
             label="Reset password"
-            value="A reset link will be sent to your email"
+            value="A confirmation code will be sent to your email"
             action={
               <button
                 className="text-sm font-semibold text-primary hover:underline"
