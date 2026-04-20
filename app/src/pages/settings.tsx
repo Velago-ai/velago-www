@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "@/components/app-layout";
 import { ChevronRight, Pencil, Check, X } from "lucide-react";
-import { signOut, fetchMe, updateMe } from "@/lib/api-auth";
+import { signOut, fetchMe, updateMe, resetPassword } from "@/lib/api-auth";
 import { getAccessToken, clearTokens } from "@/lib/auth";
 import { userStore, useProfile } from "@/lib/user-store";
 
@@ -220,6 +220,27 @@ export default function Settings() {
             }}
           />
           <EditableRow label="Phone" value={profile?.phone ?? profile?.phone_number ?? ""} onSave={(v) => patchField({ phone: v })} />
+          <Row
+            label="Reset password"
+            value="A reset link will be sent to your email"
+            action={
+              <button
+                className="text-sm font-semibold text-primary hover:underline"
+                onClick={async () => {
+                  const email = profile?.email;
+                  if (!email) return;
+                  try {
+                    await resetPassword(email);
+                    clearTokens();
+                    userStore.set(null);
+                    setLocation("/auth");
+                  } catch { /* ignore */ }
+                }}
+              >
+                Reset
+              </button>
+            }
+          />
         </Section>
 
         <Section title="Default address">
