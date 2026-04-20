@@ -170,14 +170,13 @@ export default function Settings() {
 
   const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || profile?.name || "";
 
-  // Parse saved_addresses from profile
-  const addresses = profile?.saved_addresses
-    ? Object.entries(profile.saved_addresses).map(([key, val]) => ({
-        id: key,
-        label: key.charAt(0).toUpperCase() + key.slice(1),
-        value: String(val ?? ""),
-      }))
-    : [];
+  // Parse default address from profile
+  const defaultAddr = profile?.saved_addresses?.default as
+    | { address?: string; city?: string; postcode?: string; country?: string }
+    | undefined;
+  const defaultAddrStr = defaultAddr
+    ? [defaultAddr.address, defaultAddr.city, defaultAddr.postcode, defaultAddr.country].filter(Boolean).join(", ")
+    : "";
 
   return (
     <AppLayout>
@@ -226,25 +225,32 @@ export default function Settings() {
           />
         </Section>
 
-        <Section title="Addresses">
-          {addresses.map((a) => (
+        <Section title="Default address">
+          {defaultAddrStr ? (
             <Row
-              key={a.id}
-              label={a.label}
-              value={a.value}
+              label="Address"
+              value={defaultAddrStr}
               action={
                 <InlineEdit
-                  value={a.value}
+                  value={defaultAddrStr}
                   onSave={async (v) => {
-                    const updated = { ...profile?.saved_addresses, [a.id]: v };
+                    const parts = v.split(",").map((s) => s.trim());
+                    const updated = {
+                      ...profile?.saved_addresses,
+                      default: {
+                        address: parts[0] ?? "",
+                        city: parts[1] ?? "",
+                        postcode: parts[2] ?? "",
+                        country: parts[3] ?? "",
+                      },
+                    };
                     await patchField({ saved_addresses: updated });
                   }}
                 />
               }
             />
-          ))}
-          {addresses.length === 0 && (
-            <Row label="" value={<span className="text-muted-foreground text-xs">No saved addresses</span>} />
+          ) : (
+            <Row label="" value={<span className="text-muted-foreground text-xs">No saved address</span>} />
           )}
         </Section>
 
