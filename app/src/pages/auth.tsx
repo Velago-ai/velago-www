@@ -23,12 +23,19 @@ export default function Auth() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated()) setLocation("/voice");
+    if (isAuthenticated()) { setLocation("/voice"); return; }
+    const params = new URLSearchParams(window.location.search);
+    const resetEmail = params.get("reset");
+    if (resetEmail) {
+      setEmail(resetEmail);
+      setMode("reset-code");
+    }
   }, []);
 
   function switchMode(m: Mode) {
@@ -118,11 +125,13 @@ export default function Auth() {
     setError(null);
     const pwdErr = validateNewPassword();
     if (pwdErr) { setError(pwdErr); return; }
+    if (newPassword !== confirmNewPassword) { setError("Passwords do not match."); return; }
     setLoading(true);
     try {
       await confirmReset(email, code, newPassword);
       setCode("");
       setNewPassword("");
+      setConfirmNewPassword("");
       setPassword("");
       setSuccess("Password updated. Sign in with your new password.");
       switchMode("login");
@@ -343,6 +352,14 @@ export default function Auth() {
                     Min 8 characters, at least one letter and one number.
                   </p>
                 </div>
+                <Input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  required
+                  autoComplete="new-password"
+                />
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 {success && <p className="text-sm text-emerald-600">{success}</p>}
                 <Button
