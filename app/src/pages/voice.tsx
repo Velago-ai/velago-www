@@ -483,8 +483,12 @@ export default function Voice() {
     setIsTyping(true);
   }
 
+  const selectGuardRef = useRef(false);
   function selectQuote(provider: string, price: string, currency: string) {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
+    if (selectGuardRef.current) return;
+    selectGuardRef.current = true;
+    setTimeout(() => { selectGuardRef.current = false; }, 1000);
     const text = `Yes, ${provider} for ${price} ${currency}`;
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
     pushEntry({ id: nextId(), type: "text", role: "user", content: text });
