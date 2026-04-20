@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { isAuthenticated } from "@/lib/auth";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Auth from "@/pages/auth";
@@ -11,10 +12,14 @@ import Settings from "@/pages/settings";
 
 const queryClient = new QueryClient();
 
+function RootPage() {
+  return isAuthenticated() ? <Voice /> : <Home />;
+}
+
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Voice} />
+      <Route path="/" component={RootPage} />
       <Route path="/landing" component={Home} />
       <Route path="/auth" component={Auth} />
       <Route path="/voice" component={Voice} />
