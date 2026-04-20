@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "@/components/app-layout";
 import { ChevronRight, Pencil, Check, X } from "lucide-react";
-import { signOut, fetchMe, updateMe, resetPassword } from "@/lib/api-auth";
+import { signOut, fetchMe, updateMe, requestResetCode } from "@/lib/api-auth";
 import { getAccessToken, clearTokens } from "@/lib/auth";
 import { userStore, useProfile } from "@/lib/user-store";
 
@@ -230,7 +230,7 @@ export default function Settings() {
                   const email = profile?.email;
                   if (!email) return;
                   try {
-                    await resetPassword(email);
+                    await requestResetCode(email);
                     clearTokens();
                     userStore.set(null);
                     setLocation("/auth");

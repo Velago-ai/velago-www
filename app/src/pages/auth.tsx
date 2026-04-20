@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { register, confirmEmail, login, resetPassword } from "@/lib/api-auth";
+import { register, confirmEmail, login, requestResetCode, confirmReset } from "@/lib/api-auth";
 import { isAuthenticated, setTokens } from "@/lib/auth";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
 
@@ -12,7 +12,7 @@ const LOGO_FILTER =
 // Min 8 chars, at least 1 letter, at least 1 digit, no spaces/quotes/commas
 const PASSWORD_RE = /^(?=.*[a-zA-Z])(?=.*\d)[^\s'",]{8,}$/;
 
-type Mode = "login" | "register" | "confirm" | "reset";
+type Mode = "login" | "register" | "confirm" | "reset-email" | "reset-code";
 
 export default function Auth() {
   const [, setLocation] = useLocation();
@@ -22,7 +22,9 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [code, setCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -32,6 +34,7 @@ export default function Auth() {
   function switchMode(m: Mode) {
     setMode(m);
     setError(null);
+    setSuccess(null);
   }
 
   function validatePassword(): string | null {
@@ -93,15 +96,57 @@ export default function Auth() {
     }
   }
 
-  async function handleReset(e: React.FormEvent) {
+  async function handleResetRequest(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!email) { setError("Please enter your email."); return; }
     setLoading(true);
     try {
-      await resetPassword(email);
-      setError(null);
+      await requestResetCode(email);
+      setCode("");
+      setNewPassword("");
+      switchMode("reset-code");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResetConfirm(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const pwdErr = validateNewPassword();
+    if (pwdErr) { setError(pwdErr); return; }
+    setLoading(true);
+    try {
+      await confirmReset(email, code, newPassword);
+      setCode("");
+      setNewPassword("");
+      setPassword("");
+      setSuccess("Password updated. Sign in with your new password.");
       switchMode("login");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function validateNewPassword(): string | null {
+    if (newPassword.length < 8) return "Password must be at least 8 characters.";
+    if (!/[a-zA-Z]/.test(newPassword)) return "Password must contain at least one letter.";
+    if (!/\d/.test(newPassword)) return "Password must contain at least one number.";
+    if (!PASSWORD_RE.test(newPassword)) return "Password must not contain spaces, quotes, or commas.";
+    return null;
+  }
+
+  async function handleResendCode() {
+    setError(null);
+    setLoading(true);
+    try {
+      await requestResetCode(email);
+      setSuccess("Code resent. Check your email.");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -144,6 +189,7 @@ export default function Auth() {
                   autoComplete="current-password"
                 />
                 {error && <p className="text-sm text-destructive">{error}</p>}
+                {success && <p className="text-sm text-emerald-600">{success}</p>}
                 <Button
                   type="submit"
                   disabled={loading}
@@ -155,7 +201,7 @@ export default function Auth() {
               <p className="text-center text-sm text-muted-foreground mt-4">
                 <button
                   type="button"
-                  onClick={() => switchMode("reset")}
+                  onClick={() => switchMode("reset-email")}
                   className="text-primary font-medium hover:underline"
                 >
                   Forgot password?
@@ -230,13 +276,13 @@ export default function Auth() {
             </>
           )}
 
-          {mode === "reset" && (
+          {mode === "reset-email" && (
             <>
               <h1 className="text-2xl font-bold text-foreground mb-1">Reset password</h1>
               <p className="text-muted-foreground text-sm mb-6">
-                Enter your email and we'll send you a reset link
+                Enter your email and we'll send you a verification code
               </p>
-              <form onSubmit={handleReset} className="flex flex-col gap-3">
+              <form onSubmit={handleResetRequest} className="flex flex-col gap-3">
                 <Input
                   type="email"
                   placeholder="Email"
@@ -251,7 +297,7 @@ export default function Auth() {
                   disabled={loading}
                   className="h-11 mt-1 rounded-full bg-primary-gradient text-white border-0"
                 >
-                  {loading ? "Sending…" : "Send reset link"}
+                  {loading ? "Sending…" : "Send code"}
                 </Button>
               </form>
               <p className="text-center text-sm text-muted-foreground mt-6">
@@ -262,6 +308,68 @@ export default function Auth() {
                   className="text-primary font-medium hover:underline"
                 >
                   Sign in
+                </button>
+              </p>
+            </>
+          )}
+
+          {mode === "reset-code" && (
+            <>
+              <h1 className="text-2xl font-bold text-foreground mb-1">Enter code</h1>
+              <p className="text-muted-foreground text-sm mb-6">
+                We sent a verification code to{" "}
+                <span className="text-foreground font-medium">{email}</span>
+              </p>
+              <form onSubmit={handleResetConfirm} className="flex flex-col gap-3">
+                <Input
+                  type="text"
+                  placeholder="Verification code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  required
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                />
+                <div>
+                  <Input
+                    type="password"
+                    placeholder="New password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                    autoComplete="new-password"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1 px-1">
+                    Min 8 characters, at least one letter and one number.
+                  </p>
+                </div>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                {success && <p className="text-sm text-emerald-600">{success}</p>}
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="h-11 mt-1 rounded-full bg-primary-gradient text-white border-0"
+                >
+                  {loading ? "Updating…" : "Set new password"}
+                </Button>
+              </form>
+              <p className="text-center text-sm text-muted-foreground mt-4">
+                <button
+                  type="button"
+                  onClick={handleResendCode}
+                  disabled={loading}
+                  className="text-primary font-medium hover:underline disabled:opacity-50"
+                >
+                  Resend code
+                </button>
+              </p>
+              <p className="text-center text-sm text-muted-foreground mt-2">
+                <button
+                  type="button"
+                  onClick={() => switchMode("login")}
+                  className="text-primary font-medium hover:underline"
+                >
+                  Back to sign in
                 </button>
               </p>
             </>
