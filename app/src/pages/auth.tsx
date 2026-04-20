@@ -2,11 +2,9 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { register, confirmEmail } from "@/lib/api-auth";
-import { isAuthenticated } from "@/lib/auth";
+import { register, confirmEmail, login, resetPassword } from "@/lib/api-auth";
+import { isAuthenticated, setTokens } from "@/lib/auth";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
-import { login } from "@/lib/api-auth";
-import { setTokens } from "@/lib/auth";
 
 const LOGO_FILTER =
   "brightness(0) saturate(100%) invert(18%) sepia(90%) saturate(2500%) hue-rotate(220deg) brightness(95%) contrast(95%)";
@@ -14,7 +12,7 @@ const LOGO_FILTER =
 // Min 8 chars, at least 1 letter, at least 1 digit, no spaces/quotes/commas
 const PASSWORD_RE = /^(?=.*[a-zA-Z])(?=.*\d)[^\s'",]{8,}$/;
 
-type Mode = "login" | "register" | "confirm";
+type Mode = "login" | "register" | "confirm" | "reset";
 
 export default function Auth() {
   const [, setLocation] = useLocation();
@@ -95,6 +93,22 @@ export default function Auth() {
     }
   }
 
+  async function handleReset(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (!email) { setError("Please enter your email."); return; }
+    setLoading(true);
+    try {
+      await resetPassword(email);
+      setError(null);
+      switchMode("login");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main className="min-h-[100dvh] flex flex-col items-center justify-center bg-background px-6">
       <div className="w-full max-w-sm">
@@ -138,7 +152,16 @@ export default function Auth() {
                   {loading ? "Signing in…" : "Sign in"}
                 </Button>
               </form>
-              <p className="text-center text-sm text-muted-foreground mt-6">
+              <p className="text-center text-sm text-muted-foreground mt-4">
+                <button
+                  type="button"
+                  onClick={() => switchMode("reset")}
+                  className="text-primary font-medium hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </p>
+              <p className="text-center text-sm text-muted-foreground mt-2">
                 No account?{" "}
                 <button
                   type="button"
@@ -196,6 +219,43 @@ export default function Auth() {
               </form>
               <p className="text-center text-sm text-muted-foreground mt-6">
                 Have an account?{" "}
+                <button
+                  type="button"
+                  onClick={() => switchMode("login")}
+                  className="text-primary font-medium hover:underline"
+                >
+                  Sign in
+                </button>
+              </p>
+            </>
+          )}
+
+          {mode === "reset" && (
+            <>
+              <h1 className="text-2xl font-bold text-foreground mb-1">Reset password</h1>
+              <p className="text-muted-foreground text-sm mb-6">
+                Enter your email and we'll send you a reset link
+              </p>
+              <form onSubmit={handleReset} className="flex flex-col gap-3">
+                <Input
+                  type="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="h-11 mt-1 rounded-full bg-primary-gradient text-white border-0"
+                >
+                  {loading ? "Sending…" : "Send reset link"}
+                </Button>
+              </form>
+              <p className="text-center text-sm text-muted-foreground mt-6">
+                Remember your password?{" "}
                 <button
                   type="button"
                   onClick={() => switchMode("login")}
