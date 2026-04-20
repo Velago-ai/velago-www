@@ -483,9 +483,9 @@ export default function Voice() {
     setIsTyping(true);
   }
 
-  function selectQuote(provider: string) {
+  function selectQuote(provider: string, price: string, currency: string) {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
-    const text = `Yes, ${provider}`;
+    const text = `Yes, ${provider} for ${price} ${currency}`;
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
     pushEntry({ id: nextId(), type: "text", role: "user", content: text });
     setIsTyping(true);
@@ -638,7 +638,7 @@ function TypingDots() {
   );
 }
 
-function Bubble({ entry, index, onSelect }: { entry: TranscriptEntry; index: number; onSelect?: (provider: string) => void }) {
+function Bubble({ entry, index, onSelect }: { entry: TranscriptEntry; index: number; onSelect?: (provider: string, price: string, currency: string) => void }) {
   const delay = `${Math.min(index, 6) * 50}ms`;
 
   if (entry.type === "text") {
@@ -721,7 +721,7 @@ function Bubble({ entry, index, onSelect }: { entry: TranscriptEntry; index: num
             <div className="text-xs font-semibold text-primary uppercase tracking-wide mt-1">{entry.fareName}</div>
           )}
           <div className="mt-3 flex justify-end">
-            <button className="vg-btn-primary py-2 px-5 text-sm" onClick={() => onSelect?.(entry.provider)}>Select</button>
+            <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry.provider, entry.price, entry.currency); }}>Select</button>
           </div>
         </div>
       </div>
