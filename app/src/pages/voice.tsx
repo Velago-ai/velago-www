@@ -254,16 +254,23 @@ export default function Voice() {
     setTranscript((prev) => [...prev, entry]);
   }
 
+  function pushTextEntry(role: "user" | "agent", content: string) {
+    const text = content.trim();
+    if (!text) return;
+    setIsTyping(false);
+    setTranscript((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.type === "text" && last.role === role && last.content.trim() === text) return prev;
+      return [...prev, { id: nextId(), type: "text", role, content: text }];
+    });
+  }
+
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? "");
     if (t === "ConversationText") {
-      if (msg.role === "user") return; // already added locally
-      pushEntry({
-        id: nextId(),
-        type: "text",
-        role: "agent",
-        content: String(msg.content ?? msg.text ?? ""),
-      });
+      const rawRole = String(msg.role ?? "").toLowerCase();
+      const role: "user" | "agent" = rawRole === "user" ? "user" : "agent";
+      pushTextEntry(role, String(msg.content ?? msg.text ?? ""));
       return;
     }
     if (t === "AgentThinking" || t === "FunctionCallRequest" || t === "BookingFieldsProgress") {
