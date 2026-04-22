@@ -141,8 +141,8 @@ function extractPaymentUrl(value: string): string | null {
 }
 
 function extractPaymentUrlFromPayload(value: unknown, depth = 0): string | null {
-  if (depth > 4 || value == null) return null;
-  if (typeof value === "string") return extractPaymentUrl(value);
+  if (depth > 6 || value == null) return null;
+  if (typeof value !== "object") return null;
 
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -152,16 +152,22 @@ function extractPaymentUrlFromPayload(value: unknown, depth = 0): string | null 
     return null;
   }
 
-  if (typeof value !== "object") return null;
-
   const record = value as Record<string, unknown>;
-  const keys = ["checkout_url", "checkoutUrl", "payment_url", "paymentUrl", "url"];
-  for (const key of keys) {
-    const found = extractPaymentUrlFromPayload(record[key], depth + 1);
+  const keys = new Set(["checkout_url", "checkouturl", "payment_url", "paymenturl"]);
+
+  for (const [rawKey, nested] of Object.entries(record)) {
+    const key = rawKey.toLowerCase();
+    if (!keys.has(key)) continue;
+    if (typeof nested === "string") {
+      const direct = extractPaymentUrl(nested);
+      if (direct) return direct;
+    }
+    const found = extractPaymentUrlFromPayload(nested, depth + 1);
     if (found) return found;
   }
 
   for (const nested of Object.values(record)) {
+    if (typeof nested !== "object" || nested == null) continue;
     const found = extractPaymentUrlFromPayload(nested, depth + 1);
     if (found) return found;
   }
@@ -328,13 +334,20 @@ export default function Voice() {
 
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? "");
+    const isPaymentEvent =
+      t.toLowerCase().includes("payment") ||
+      typeof msg.requires_action === "boolean" ||
+      msg.checkout_url != null ||
+      msg.checkoutUrl != null ||
+      msg.order_token != null ||
+      msg.orderToken != null;
     const payloadPaymentUrl = extractPaymentUrlFromPayload(msg);
     const hasNewPaymentUrl =
       Boolean(payloadPaymentUrl) && payloadPaymentUrl !== paymentUrlRef.current;
     if (hasNewPaymentUrl && payloadPaymentUrl) {
       paymentUrlRef.current = payloadPaymentUrl;
       attachPaymentUrlToLatestConfirmed(payloadPaymentUrl);
-      if (t !== "ConversationText") {
+      if (isPaymentEvent && t !== "ConversationText") {
         pushTextEntry("agent", "Payment link is ready. Tap Pay order to complete checkout.");
       }
     }
@@ -351,10 +364,7 @@ export default function Voice() {
       pushTextEntry(role, content);
       return;
     }
-    if (hasNewPaymentUrl) {
-      setIsTyping(false);
-      return;
-    }
+    if (hasNewPaymentUrl) setIsTyping(false);
     if (t === "AgentThinking" || t === "FunctionCallRequest" || t === "BookingFieldsProgress") {
       setIsTyping(true);
       return;
