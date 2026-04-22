@@ -140,6 +140,34 @@ function extractPaymentUrl(value: string): string | null {
   return urls.find((url) => url.toLowerCase().includes("revolut.com")) ?? urls[0];
 }
 
+function extractPaymentUrlFromPayload(value: unknown, depth = 0): string | null {
+  if (depth > 4 || value == null) return null;
+  if (typeof value === "string") return extractPaymentUrl(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = extractPaymentUrlFromPayload(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  const keys = ["checkout_url", "checkoutUrl", "payment_url", "paymentUrl", "url"];
+  for (const key of keys) {
+    const found = extractPaymentUrlFromPayload(record[key], depth + 1);
+    if (found) return found;
+  }
+
+  for (const nested of Object.values(record)) {
+    const found = extractPaymentUrlFromPayload(nested, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -300,16 +328,31 @@ export default function Voice() {
 
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? "");
+    const payloadPaymentUrl = extractPaymentUrlFromPayload(msg);
+    const hasNewPaymentUrl =
+      Boolean(payloadPaymentUrl) && payloadPaymentUrl !== paymentUrlRef.current;
+    if (hasNewPaymentUrl && payloadPaymentUrl) {
+      paymentUrlRef.current = payloadPaymentUrl;
+      attachPaymentUrlToLatestConfirmed(payloadPaymentUrl);
+      if (t !== "ConversationText") {
+        pushTextEntry("agent", "Payment link is ready. Tap Pay order to complete checkout.");
+      }
+    }
+
     if (t === "ConversationText") {
       const rawRole = String(msg.role ?? "").toLowerCase();
       const role: "user" | "agent" = rawRole === "user" ? "user" : "agent";
       const content = String(msg.content ?? msg.text ?? "");
       const paymentUrl = extractPaymentUrl(content);
-      if (paymentUrl) {
+      if (paymentUrl && paymentUrl !== paymentUrlRef.current) {
         paymentUrlRef.current = paymentUrl;
         attachPaymentUrlToLatestConfirmed(paymentUrl);
       }
       pushTextEntry(role, content);
+      return;
+    }
+    if (hasNewPaymentUrl) {
+      setIsTyping(false);
       return;
     }
     if (t === "AgentThinking" || t === "FunctionCallRequest" || t === "BookingFieldsProgress") {
