@@ -138,3 +138,46 @@ export interface UpdateProfile {
 export function updateMe(token: string, data: UpdateProfile): Promise<UserProfile> {
   return apiRequest("PATCH", "/auth/me", data, token);
 }
+
+export interface ListOrdersParams {
+  category?: string;
+  page?: number;
+  per_page?: number;
+}
+
+export interface OrderListItem {
+  id?: string;
+  order_id?: string;
+  meshhub_order_id?: string;
+  supplier_order_id?: string;
+  category?: string;
+  status?: string;
+  price?: number | string;
+  currency?: string;
+  provider?: string;
+  supplier?: string;
+  service?: string;
+  service_name?: string;
+  created_at?: string;
+  expires_at?: string;
+  [key: string]: unknown;
+}
+
+export interface OrdersPageResponse {
+  items?: OrderListItem[];
+  results?: OrderListItem[];
+  data?: OrderListItem[];
+  total?: number;
+  page?: number;
+  per_page?: number;
+  [key: string]: unknown;
+}
+
+export function listOrders(token: string, params: ListOrdersParams = {}): Promise<OrdersPageResponse> {
+  const q = new URLSearchParams();
+  if (params.category) q.set("category", params.category);
+  if (params.page != null) q.set("page", String(params.page));
+  if (params.per_page != null) q.set("per_page", String(params.per_page));
+  const qs = q.toString();
+  return apiRequest("GET", `/orders${qs ? `?${qs}` : ""}`, null, token);
+}
