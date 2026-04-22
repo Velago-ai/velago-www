@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
-import { CHAT_SESSIONS, type Category, type ChatSession, type BookingRecord } from "@/lib/placeholder-data";
-import { Search, ChevronRight, ChevronDown, Utensils, Plane, Package, Hotel, RotateCcw, FileDown } from "lucide-react";
-import { downloadConfirmation, confirmationLabel } from "@/lib/confirmation-pdf";
+import { type Category } from "@/lib/placeholder-data";
+import { Search, ChevronDown, ChevronRight, RotateCcw, Utensils, Plane, Package, Hotel } from "lucide-react";
 import { getAccessToken } from "@/lib/auth";
 import { listOrders, type OrderListItem, type OrdersPageResponse } from "@/lib/api-auth";
 
@@ -15,19 +14,38 @@ const CATEGORY_ICON: Record<Category, { Icon: typeof Utensils; bg: string; color
 
 const FILTERS = ["All", "Flights", "Parcel delivery"] as const;
 const PER_PAGE = 20;
-
 type Filter = (typeof FILTERS)[number];
 
-function StatusChip({ status }: { status: ChatSession["status"] | BookingRecord["status"] }) {
+interface UiOrder {
+  id: string;
+  category: Category;
+  provider: string;
+  service: string;
+  date: string;
+  price: string;
+  status: string;
+  reference: string;
+  details: { label: string; value: string }[];
+}
+
+function statusKey(status: string): string {
+  return status.trim().toLowerCase();
+}
+
+function isPastStatus(status: string): boolean {
+  const key = statusKey(status);
+  return key === "completed" || key === "failed" || key === "canceled" || key === "cancelled";
+}
+
+function StatusChip({ status }: { status: string }) {
+  const key = statusKey(status);
   const cls =
-    status === "Confirmed"
-      ? "vg-chip-confirmed"
-      : status === "Completed"
-      ? "vg-chip-completed"
-      : status === "Pending"
-        ? "vg-chip-pending"
-        : "vg-chip-cancelled";
-  return <span className={`vg-chip ${cls}`}>{status}</span>;
+    key.includes("fail") || key.includes("cancel")
+      ? "vg-chip-cancelled"
+      : key.includes("complete") || key.includes("paid") || key.includes("settled")
+        ? "vg-chip-completed"
+        : "vg-chip-pending";
+  return <span className={`vg-chip ${cls}`}>{status || "unknown"}</span>;
 }
 
 function CategoryAvatar({ category }: { category: Category }) {
@@ -39,21 +57,20 @@ function CategoryAvatar({ category }: { category: Category }) {
   );
 }
 
-function matchesFilter(filter: Filter, cat: Category) {
+function matchesFilter(filter: Filter, category: Category): boolean {
   if (filter === "All") return true;
-  if (filter === "Flights") return cat === "flight";
-  if (filter === "Parcel delivery") return cat === "parcel";
-  return true;
+  if (filter === "Flights") return category === "flight";
+  return category === "parcel";
 }
 
-function filterToApiCategories(filter: Filter): string[] {
-  if (filter === "Flights") return ["flights"];
-  if (filter === "Parcel delivery") return ["parcel_delivery"];
-  return [];
+function filterToApiCategory(filter: Filter): string | undefined {
+  if (filter === "Flights") return "flights";
+  if (filter === "Parcel delivery") return "parcel_delivery";
+  return undefined;
 }
 
-function extractOrderItems(data: OrdersPageResponse): OrderListItem[] {
-  const list = data.items ?? data.results ?? data.data ?? [];
+function extractOrderItems(response: OrdersPageResponse): OrderListItem[] {
+  const list = response.items ?? response.results ?? response.data ?? [];
   return Array.isArray(list) ? list : [];
 }
 
@@ -64,23 +81,14 @@ function normalizeCategory(value: unknown): Category | null {
   return null;
 }
 
-function normalizeStatus(value: unknown): BookingRecord["status"] {
-  const v = String(value ?? "").toLowerCase();
-  if (v.includes("cancel") || v.includes("fail") || v.includes("declin") || v.includes("expired")) {
-    return "Cancelled";
-  }
-  if (v.includes("complete") || v.includes("paid") || v.includes("settled")) return "Completed";
-  return "Confirmed";
-}
-
-function readFirstString(values: unknown[], fallback: string): string {
+function firstString(values: unknown[], fallback: string): string {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return fallback;
 }
 
-function formatOrderDate(value: unknown): string {
+function formatDate(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "Unknown date";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -101,23 +109,24 @@ function formatPrice(price: unknown, currency: unknown): string {
   return `- ${ccy}`;
 }
 
-function orderToBooking(order: OrderListItem, index: number): BookingRecord | null {
+function toUiOrder(order: OrderListItem, index: number): UiOrder | null {
   const category = normalizeCategory(order.category ?? order.service_name ?? order.service);
   if (!category) return null;
-  const provider = readFirstString([order.provider, order.supplier, order.service_name], "Velago");
-  const service = readFirstString(
-    [order.service, order.service_name, order.category],
-    category === "flight" ? "Flight" : "Parcel delivery",
-  );
 
-  const reference = readFirstString(
+  const status = firstString([order.status], "unknown");
+  const provider = firstString([order.provider, order.supplier, order.service_name], "Velago");
+  const service = firstString(
+    [order.service, order.service_name, order.category],
+    category === "flight" ? "flights" : "parcel_delivery",
+  );
+  const reference = firstString(
     [order.meshhub_order_id, order.order_id, order.id, order.supplier_order_id],
     `order-${index + 1}`,
   );
 
   const details: { label: string; value: string }[] = [
-    { label: "Status", value: String(order.status ?? "unknown") },
-    { label: "Order ID", value: readFirstString([order.id, order.order_id], "n/a") },
+    { label: "Status", value: status },
+    { label: "Order ID", value: firstString([order.id, order.order_id], "n/a") },
   ];
   if (typeof order.meshhub_order_id === "string" && order.meshhub_order_id) {
     details.push({ label: "MeshHub ID", value: order.meshhub_order_id });
@@ -126,17 +135,17 @@ function orderToBooking(order: OrderListItem, index: number): BookingRecord | nu
     details.push({ label: "Supplier ID", value: order.supplier_order_id });
   }
   if (typeof order.expires_at === "string" && order.expires_at) {
-    details.push({ label: "Expires", value: formatOrderDate(order.expires_at) });
+    details.push({ label: "Expires", value: formatDate(order.expires_at) });
   }
 
   return {
-    id: readFirstString([order.id, order.order_id, order.meshhub_order_id], `row-${index}`),
+    id: firstString([order.id, order.order_id, order.meshhub_order_id], `row-${index}`),
+    category,
     provider,
     service,
-    category,
-    date: formatOrderDate(order.created_at),
+    date: formatDate(order.created_at),
     price: formatPrice(order.price, order.currency),
-    status: normalizeStatus(order.status),
+    status,
     reference,
     details,
   };
@@ -144,28 +153,21 @@ function orderToBooking(order: OrderListItem, index: number): BookingRecord | nu
 
 export default function Bookings() {
   const [filter, setFilter] = useState<Filter>("All");
-  const [openSession, setOpenSession] = useState<string | null>(null);
-  const [openBooking, setOpenBooking] = useState<string | null>(null);
+  const [openActive, setOpenActive] = useState<string | null>(null);
+  const [openPast, setOpenPast] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  const [orders, setOrders] = useState<BookingRecord[]>([]);
+  const [orders, setOrders] = useState<UiOrder[]>([]);
   const [ordersTotal, setOrdersTotal] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
 
-  const sessions = useMemo(
-    () =>
-      CHAT_SESSIONS.filter(
-        (s) => matchesFilter(filter, s.category) && s.title.toLowerCase().includes(search.toLowerCase()),
-      ),
-    [filter, search],
-  );
-
   useEffect(() => {
     setOrdersPage(1);
-    setOpenBooking(null);
+    setOpenActive(null);
+    setOpenPast(null);
   }, [filter]);
 
   useEffect(() => {
@@ -179,38 +181,19 @@ export default function Bookings() {
     }
 
     let cancelled = false;
-    const categoryCandidates = filterToApiCategories(filter);
 
     const run = async () => {
       setOrdersLoading(true);
       setOrdersError(null);
       try {
-        let response: OrdersPageResponse | null = null;
-        let items: OrderListItem[] = [];
-
-        if (categoryCandidates.length === 0) {
-          response = await listOrders(token, { page: ordersPage, per_page: PER_PAGE });
-          items = extractOrderItems(response);
-        } else {
-          for (let i = 0; i < categoryCandidates.length; i++) {
-            const category = categoryCandidates[i];
-            const candidateResponse = await listOrders(token, {
-              category,
-              page: ordersPage,
-              per_page: PER_PAGE,
-            });
-            const candidateItems = extractOrderItems(candidateResponse);
-            response = candidateResponse;
-            items = candidateItems;
-            if (candidateItems.length > 0 || i === categoryCandidates.length - 1) break;
-          }
-        }
-
+        const category = filterToApiCategory(filter);
+        const response = await listOrders(token, { category, page: ordersPage, per_page: PER_PAGE });
+        const items = extractOrderItems(response);
         const mapped = items
-          .map((order, index) => orderToBooking(order, index))
-          .filter((b): b is BookingRecord => b != null)
-          .filter((b) => matchesFilter(filter, b.category));
-        const total = Number(response?.total ?? mapped.length);
+          .map((order, index) => toUiOrder(order, index))
+          .filter((order): order is UiOrder => order != null)
+          .filter((order) => matchesFilter(filter, order.category));
+        const total = Number(response.total ?? mapped.length);
 
         if (!cancelled) {
           setOrders(mapped);
@@ -233,6 +216,17 @@ export default function Bookings() {
     };
   }, [filter, ordersPage, reloadSeq]);
 
+  const query = search.trim().toLowerCase();
+  const visibleOrders = useMemo(() => {
+    if (!query) return orders;
+    return orders.filter((o) =>
+      [o.provider, o.service, o.reference, o.status].some((v) => v.toLowerCase().includes(query)),
+    );
+  }, [orders, query]);
+
+  const activeOrders = useMemo(() => visibleOrders.filter((o) => !isPastStatus(o.status)), [visibleOrders]);
+  const pastOrders = useMemo(() => visibleOrders.filter((o) => isPastStatus(o.status)), [visibleOrders]);
+
   const canPrev = ordersPage > 1;
   const canNext = ordersPage * PER_PAGE < ordersTotal;
 
@@ -247,7 +241,7 @@ export default function Bookings() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search past chats..."
+              placeholder="Search bookings..."
               className="w-full h-11 pl-11 pr-4 rounded-full bg-white border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
@@ -272,75 +266,6 @@ export default function Bookings() {
           </div>
 
           <div className="vg-card divide-y divide-border overflow-hidden">
-            {sessions.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-10">No chats match.</p>
-            )}
-            {sessions.map((s, i) => {
-              const open = openSession === s.id;
-              return (
-                <div key={s.id} className="vg-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
-                  <button
-                    onClick={() => setOpenSession(open ? null : s.id)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/50 transition-colors"
-                  >
-                    <CategoryAvatar category={s.category} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-foreground truncate">{s.title}</div>
-                      <div className="text-xs text-muted-foreground">{s.date}</div>
-                    </div>
-                    <StatusChip status={s.status} />
-                    {open ? (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                    )}
-                  </button>
-                  {open && (
-                    <div className="px-4 pb-4 bg-muted/30">
-                      <div className="rounded-2xl bg-white border border-border p-4 space-y-3">
-                        <div className="flex justify-end">
-                          <div className="bg-primary text-white text-sm rounded-full rounded-tr-md px-4 py-2 max-w-[70%]">
-                            {s.title.toLowerCase().startsWith("flight")
-                              ? "Cheapest flight to Madrid next Friday."
-                              : `New ${s.title.toLowerCase()} please.`}
-                          </div>
-                        </div>
-                        <div className="flex">
-                          <div className="bg-muted text-foreground text-sm rounded-2xl rounded-tl-md px-4 py-2 max-w-[80%]">
-                            {s.preview}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-border p-3 bg-secondary/50 text-sm">
-                          <div className="flex items-center justify-between gap-3 mb-2">
-                            <div className="font-semibold">Booking confirmation</div>
-                            <span className="text-xs text-muted-foreground">PDF - ready</span>
-                          </div>
-                          <p className="text-muted-foreground mb-3">
-                            Your {confirmationLabel(s.category).replace(" (PDF)", "").toLowerCase()} is ready to download.
-                          </p>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              downloadConfirmation(s);
-                            }}
-                            className="vg-btn-primary py-2 px-4 text-sm w-full sm:w-auto"
-                          >
-                            <FileDown className="w-4 h-4" /> Download {confirmationLabel(s.category)}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        <section>
-          <h2 className="font-display text-xl md:text-2xl font-bold mb-4">Past bookings</h2>
-
-          <div className="vg-card divide-y divide-border overflow-hidden">
             {ordersLoading && (
               <p className="text-sm text-muted-foreground text-center py-10">Loading orders...</p>
             )}
@@ -352,25 +277,80 @@ export default function Bookings() {
                 </button>
               </div>
             )}
-            {!ordersLoading && !ordersError && orders.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-10">No orders found.</p>
+            {!ordersLoading && !ordersError && activeOrders.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-10">No active bookings.</p>
             )}
 
             {!ordersLoading &&
               !ordersError &&
-              orders.map((b, i) => {
-                const open = openBooking === b.id;
+              activeOrders.map((o, i) => {
+                const open = openActive === o.id;
                 return (
-                  <div key={b.id} className="vg-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+                  <div key={o.id} className="vg-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
                     <div className="flex items-center gap-3 px-4 py-3">
-                      <CategoryAvatar category={b.category} />
-                      <button onClick={() => setOpenBooking(open ? null : b.id)} className="flex-1 min-w-0 text-left">
-                        <div className="font-semibold text-foreground">{b.provider}</div>
+                      <CategoryAvatar category={o.category} />
+                      <button onClick={() => setOpenActive(open ? null : o.id)} className="flex-1 min-w-0 text-left">
+                        <div className="font-semibold text-foreground">{o.provider}</div>
                         <div className="text-xs text-muted-foreground">
-                          {b.service} - {b.date} - <span className="font-semibold text-foreground">{b.price}</span>
+                          {o.service} - {o.date} - <span className="font-semibold text-foreground">{o.price}</span>
                         </div>
                       </button>
-                      <StatusChip status={b.status} />
+                      <StatusChip status={o.status} />
+                      {open ? (
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    {open && (
+                      <div className="px-4 pb-4 bg-muted/30">
+                        <div className="rounded-2xl bg-white border border-border p-4">
+                          <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-2">
+                            Receipt - {o.reference}
+                          </div>
+                          <div className="space-y-2">
+                            {o.details.map((d) => (
+                              <div key={d.label} className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">{d.label}</span>
+                                <span className="font-medium text-foreground text-right">{d.value}</span>
+                              </div>
+                            ))}
+                            <div className="flex justify-between text-sm pt-2 border-t border-border">
+                              <span className="text-muted-foreground">Total</span>
+                              <span className="font-bold text-foreground">{o.price}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="font-display text-xl md:text-2xl font-bold mb-4">Past bookings</h2>
+          <div className="vg-card divide-y divide-border overflow-hidden">
+            {!ordersLoading && !ordersError && pastOrders.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-10">No past bookings.</p>
+            )}
+
+            {!ordersLoading &&
+              !ordersError &&
+              pastOrders.map((o, i) => {
+                const open = openPast === o.id;
+                return (
+                  <div key={o.id} className="vg-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      <CategoryAvatar category={o.category} />
+                      <button onClick={() => setOpenPast(open ? null : o.id)} className="flex-1 min-w-0 text-left">
+                        <div className="font-semibold text-foreground">{o.provider}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {o.service} - {o.date} - <span className="font-semibold text-foreground">{o.price}</span>
+                        </div>
+                      </button>
+                      <StatusChip status={o.status} />
                       <button className="hidden sm:inline-flex vg-chip vg-chip-info gap-1 hover:opacity-80">
                         <RotateCcw className="w-3 h-3" /> Reorder
                       </button>
@@ -379,10 +359,10 @@ export default function Bookings() {
                       <div className="px-4 pb-4 bg-muted/30">
                         <div className="rounded-2xl bg-white border border-border p-4">
                           <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-2">
-                            Receipt - {b.reference}
+                            Receipt - {o.reference}
                           </div>
                           <div className="space-y-2">
-                            {b.details.map((d) => (
+                            {o.details.map((d) => (
                               <div key={d.label} className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">{d.label}</span>
                                 <span className="font-medium text-foreground text-right">{d.value}</span>
@@ -390,7 +370,7 @@ export default function Bookings() {
                             ))}
                             <div className="flex justify-between text-sm pt-2 border-t border-border">
                               <span className="text-muted-foreground">Total</span>
-                              <span className="font-bold text-foreground">{b.price}</span>
+                              <span className="font-bold text-foreground">{o.price}</span>
                             </div>
                           </div>
                           <div className="flex gap-2 mt-4 sm:hidden">
@@ -410,7 +390,7 @@ export default function Bookings() {
             <div className="flex items-center justify-between mt-3 px-1">
               <div className="text-xs text-muted-foreground">
                 Page {ordersPage}
-                {ordersTotal > 0 ? ` · ${ordersTotal} total` : ""}
+                {ordersTotal > 0 ? ` - ${ordersTotal} total` : ""}
               </div>
               <div className="flex items-center gap-2">
                 <button
