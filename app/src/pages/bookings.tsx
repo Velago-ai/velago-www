@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { type Category } from "@/lib/placeholder-data";
-import { Search, ChevronDown, ChevronRight, RotateCcw, Utensils, Plane, Package, Hotel } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, RotateCcw, Utensils, Plane, Package, Hotel, FileDown } from "lucide-react";
 import { getAccessToken } from "@/lib/auth";
 import { listOrders, type OrderListItem, type OrdersPageResponse } from "@/lib/api-auth";
+import { downloadOrderConfirmation, orderConfirmationLabel } from "@/lib/order-confirmation-pdf";
 
 const CATEGORY_ICON: Record<Category, { Icon: typeof Utensils; bg: string; color: string }> = {
   food: { Icon: Utensils, bg: "bg-emerald-100", color: "text-emerald-600" },
@@ -23,6 +24,7 @@ interface UiOrder {
   service: string;
   date: string;
   price: string;
+  statusRaw: string;
   status: string;
   reference: string;
   details: { label: string; value: string }[];
@@ -35,6 +37,55 @@ function statusKey(status: string): string {
 function isPastStatus(status: string): boolean {
   const key = statusKey(status);
   return key === "completed" || key === "failed" || key === "canceled" || key === "cancelled";
+}
+
+function titleCase(value: string): string {
+  if (!value) return value;
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function humanizeStatus(rawStatus: string): string {
+  const normalized = rawStatus.replace(/[_-]+/g, " ").trim();
+  return titleCase(normalized || "unknown");
+}
+
+function isDeliveryLikeCategory(category: Category): boolean {
+  return category === "parcel" || category === "food";
+}
+
+function mapDisplayStatus(rawStatus: string, category: Category): string {
+  const key = statusKey(rawStatus);
+  const deliveryLike = isDeliveryLikeCategory(category);
+
+  if (key === "completed" || key === "complete") return "Completed";
+  if (key === "failed") return "Failed";
+  if (key === "canceled" || key === "cancelled") return "Canceled";
+  if (key === "paid") return "Paid";
+
+  if (key === "payment_requires_action" || key === "requires_action" || key === "pending_payment" || key === "unpaid") {
+    return "Awaiting Payment";
+  }
+
+  if (
+    key === "in_transit" ||
+    key === "out_for_delivery" ||
+    key === "shipped" ||
+    key === "dispatched" ||
+    key === "courier_assigned" ||
+    key === "picked_up"
+  ) {
+    return "Delivery";
+  }
+
+  if (key === "in_progress" || key === "in-progress" || key === "processing" || key === "pending" || key === "created") {
+    return deliveryLike ? "Delivery" : "In Progress";
+  }
+
+  return humanizeStatus(rawStatus);
 }
 
 function StatusChip({ status }: { status: string }) {
@@ -113,7 +164,8 @@ function toUiOrder(order: OrderListItem, index: number): UiOrder | null {
   const category = normalizeCategory(order.category ?? order.service_name ?? order.service);
   if (!category) return null;
 
-  const status = firstString([order.status], "unknown");
+  const statusRaw = firstString([order.status], "unknown");
+  const status = mapDisplayStatus(statusRaw, category);
   const provider = firstString([order.provider, order.supplier, order.service_name], "Velago");
   const service = firstString(
     [order.service, order.service_name, order.category],
@@ -145,6 +197,7 @@ function toUiOrder(order: OrderListItem, index: number): UiOrder | null {
     service,
     date: formatDate(order.created_at),
     price: formatPrice(order.price, order.currency),
+    statusRaw,
     status,
     reference,
     details,
@@ -220,12 +273,12 @@ export default function Bookings() {
   const visibleOrders = useMemo(() => {
     if (!query) return orders;
     return orders.filter((o) =>
-      [o.provider, o.service, o.reference, o.status].some((v) => v.toLowerCase().includes(query)),
+      [o.provider, o.service, o.reference, o.status, o.statusRaw].some((v) => v.toLowerCase().includes(query)),
     );
   }, [orders, query]);
 
-  const activeOrders = useMemo(() => visibleOrders.filter((o) => !isPastStatus(o.status)), [visibleOrders]);
-  const pastOrders = useMemo(() => visibleOrders.filter((o) => isPastStatus(o.status)), [visibleOrders]);
+  const activeOrders = useMemo(() => visibleOrders.filter((o) => !isPastStatus(o.statusRaw)), [visibleOrders]);
+  const pastOrders = useMemo(() => visibleOrders.filter((o) => isPastStatus(o.statusRaw)), [visibleOrders]);
 
   const canPrev = ordersPage > 1;
   const canNext = ordersPage * PER_PAGE < ordersTotal;
@@ -320,6 +373,26 @@ export default function Bookings() {
                               <span className="font-bold text-foreground">{o.price}</span>
                             </div>
                           </div>
+                          <div className="rounded-xl border border-border p-3 bg-secondary/50 text-sm mt-4">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <div className="font-semibold">Booking confirmation</div>
+                              <span className="text-xs text-muted-foreground">PDF - ready</span>
+                            </div>
+                            <p className="text-muted-foreground mb-3">
+                              Your {orderConfirmationLabel(o.category).replace(" (PDF)", "").toLowerCase()} is ready to
+                              download.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadOrderConfirmation(o);
+                              }}
+                              className="vg-btn-primary py-2 px-4 text-sm w-full sm:w-auto"
+                            >
+                              <FileDown className="w-4 h-4" /> Download {orderConfirmationLabel(o.category)}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -372,6 +445,26 @@ export default function Bookings() {
                               <span className="text-muted-foreground">Total</span>
                               <span className="font-bold text-foreground">{o.price}</span>
                             </div>
+                          </div>
+                          <div className="rounded-xl border border-border p-3 bg-secondary/50 text-sm mt-4">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <div className="font-semibold">Booking confirmation</div>
+                              <span className="text-xs text-muted-foreground">PDF - ready</span>
+                            </div>
+                            <p className="text-muted-foreground mb-3">
+                              Your {orderConfirmationLabel(o.category).replace(" (PDF)", "").toLowerCase()} is ready to
+                              download.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadOrderConfirmation(o);
+                              }}
+                              className="vg-btn-primary py-2 px-4 text-sm w-full sm:w-auto"
+                            >
+                              <FileDown className="w-4 h-4" /> Download {orderConfirmationLabel(o.category)}
+                            </button>
                           </div>
                           <div className="flex gap-2 mt-4 sm:hidden">
                             <button className="vg-btn-ghost py-2 px-4 text-sm flex-1">
