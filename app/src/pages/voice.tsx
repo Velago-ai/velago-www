@@ -57,6 +57,7 @@ interface ConfirmedEntry {
   orderId: string;
   price: string;
   currency: string;
+  paymentUrl?: string;
 }
 
 type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry;
@@ -122,6 +123,23 @@ function resolveOfferRoute(
   return [from, to];
 }
 
+function extractPaymentUrl(value: string): string | null {
+  const matches = value.match(/https?:\/\/[^\s)]+/gi);
+  if (!matches) return null;
+
+  const urls: string[] = [];
+  for (const raw of matches) {
+    const candidate = raw.replace(/[),.;!?]+$/, "");
+    try {
+      urls.push(new URL(candidate).toString());
+    } catch {
+      // Ignore malformed URLs in conversational text
+    }
+  }
+  if (urls.length === 0) return null;
+  return urls.find((url) => url.toLowerCase().includes("revolut.com")) ?? urls[0];
+}
+
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -151,6 +169,7 @@ export default function Voice() {
   const agentSpeakingUntilRef = useRef(0);
   const isRecordingRef = useRef(false);
   const idCounterRef = useRef(0);
+  const paymentUrlRef = useRef<string | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   function nextId() { return String(++idCounterRef.current); }
@@ -265,12 +284,32 @@ export default function Voice() {
     });
   }
 
+  function attachPaymentUrlToLatestConfirmed(paymentUrl: string) {
+    setTranscript((prev) => {
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const entry = prev[i];
+        if (entry.type !== "confirmed") continue;
+        if (entry.paymentUrl === paymentUrl) return prev;
+        const next = [...prev];
+        next[i] = { ...entry, paymentUrl };
+        return next;
+      }
+      return prev;
+    });
+  }
+
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? "");
     if (t === "ConversationText") {
       const rawRole = String(msg.role ?? "").toLowerCase();
       const role: "user" | "agent" = rawRole === "user" ? "user" : "agent";
-      pushTextEntry(role, String(msg.content ?? msg.text ?? ""));
+      const content = String(msg.content ?? msg.text ?? "");
+      const paymentUrl = extractPaymentUrl(content);
+      if (paymentUrl) {
+        paymentUrlRef.current = paymentUrl;
+        attachPaymentUrlToLatestConfirmed(paymentUrl);
+      }
+      pushTextEntry(role, content);
       return;
     }
     if (t === "AgentThinking" || t === "FunctionCallRequest" || t === "BookingFieldsProgress") {
@@ -337,6 +376,7 @@ export default function Voice() {
         orderId: String(msg.order_id ?? ""),
         price: msg.price != null ? Number(msg.price).toFixed(2) : "—",
         currency: String(msg.currency ?? "EUR"),
+        paymentUrl: paymentUrlRef.current ?? undefined,
       });
       return;
     }
@@ -408,6 +448,7 @@ export default function Voice() {
   function startSession() {
     const token = getAccessToken();
     setTranscript([]);
+    paymentUrlRef.current = null;
     const plan = userStore.get()?.plan;
     connect(plan === "pro" && token ? token : null);
   }
@@ -499,12 +540,17 @@ export default function Voice() {
     setIsTyping(true);
   }
 
+  function payOrder(url: string) {
+    window.location.assign(url);
+  }
+
   async function handleLogout() {
     const token = getAccessToken();
     wsRef.current?.close(1000);
     if (token) await signOut(token).catch(() => null);
     clearTokens();
     userStore.set(null);
+    paymentUrlRef.current = null;
     setLocation("/");
   }
 
@@ -546,7 +592,7 @@ export default function Voice() {
         {!isIdle && (
           <div className="flex-1 min-h-0 overflow-y-auto py-4 flex flex-col gap-3">
             {transcript.map((entry, i) => (
-              <Bubble key={entry.id} entry={entry} index={i} onSelect={selectQuote} />
+              <Bubble key={entry.id} entry={entry} index={i} onSelect={selectQuote} onPayOrder={payOrder} />
             ))}
             {isTyping && <TypingDots />}
             <div ref={transcriptEndRef} />
@@ -646,7 +692,17 @@ function TypingDots() {
   );
 }
 
-function Bubble({ entry, index, onSelect }: { entry: TranscriptEntry; index: number; onSelect?: (provider: string, price: string, currency: string) => void }) {
+function Bubble({
+  entry,
+  index,
+  onSelect,
+  onPayOrder,
+}: {
+  entry: TranscriptEntry;
+  index: number;
+  onSelect?: (provider: string, price: string, currency: string) => void;
+  onPayOrder?: (url: string) => void;
+}) {
   const delay = `${Math.min(index, 6) * 50}ms`;
 
   if (entry.type === "text") {
@@ -751,7 +807,15 @@ function Bubble({ entry, index, onSelect }: { entry: TranscriptEntry; index: num
           {entry.orderId && (
             <div className="text-xs text-muted-foreground mt-1 break-all">Reference: {entry.orderId}</div>
           )}
-          <button className="vg-btn-primary mt-4 text-sm">Track order</button>
+          {entry.paymentUrl && (
+            <button
+              type="button"
+              className="vg-btn-primary mt-4 text-sm"
+              onClick={() => onPayOrder?.(entry.paymentUrl)}
+            >
+              Pay order
+            </button>
+          )}
         </div>
       </div>
     );
