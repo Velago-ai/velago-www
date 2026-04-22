@@ -594,7 +594,18 @@ export default function Voice() {
   }
 
   function payOrder(url: string) {
-    window.location.assign(url);
+    const popupFeatures = "popup=yes,width=520,height=760,noopener,noreferrer";
+    const popup = window.open(url, "velago-payment", popupFeatures);
+    if (popup) {
+      popup.focus();
+      return;
+    }
+    const tab = window.open(url, "_blank", "noopener,noreferrer");
+    if (tab) {
+      tab.focus();
+      return;
+    }
+    pushTextEntry("agent", "Please allow pop-ups to open payment, or copy the payment link from support.");
   }
 
   async function handleLogout() {
