@@ -1,63 +1,143 @@
-# Velago Frontend (AWS Migration)
+# Velago WWW Frontend
 
-This project contains the React-based frontend and API client for Velago, migrated from Replit to a standard Node.js environment optimized for AWS deployment (Amplify, S3/CloudFront, or ECS).
+React + Vite frontend for Velago voice booking, payment handoff, and order history UI.
 
-## Project Structure
+## Stack
 
-- `artifacts/velago-landing`: The main React (Vite) application.
-- `lib/api-client-react`: Shared API client generated from OpenAPI specs.
-- `lib/api-spec`: OpenAPI specification (`openapi.yaml`) and Orval configuration.
+- React 19 + TypeScript
+- Vite 7
+- Wouter routing
+- TanStack Query
+- `jsPDF` for confirmation export
+- npm workspaces
+
+## Workspace structure
+
+- `app` - main web application (`@workspace/velago-landing`)
+- `lib/api-client-react` - shared API client package
+- `lib/api-spec` - OpenAPI source and codegen config
+- `cdk` - infra/deployment helpers
 
 ## Prerequisites
 
-- Node.js (v18 or higher)
-- npm (v7 or higher, supports workspaces)
+- Node.js 18+
+- npm 7+
 
-## Getting Started
+## Install
 
-1. **Install Dependencies**
-   Run the following command in the root directory:
-   ```bash
-   npm install
-   ```
+```bash
+npm install
+```
 
-2. **Run Development Server**
-   ```bash
-   npm run dev
-   ```
-   This will start the landing page application at `http://localhost:5173`.
+## Run
 
-3. **Build for Production**
-   ```bash
-   npm run build
-   ```
-   The production-ready files will be located in `artifacts/velago-landing/dist`.
+From repo root:
 
-## Configuration
+```bash
+npm run dev
+```
 
-### API Integration
-The project uses a custom fetch wrapper located in `lib/api-client-react/src/custom-fetch.ts`. To point the frontend to your AWS-hosted backend:
-- Open `artifacts/velago-landing/src/main.tsx` (or your entry point).
-- Use `setBaseUrl('https://your-api-endpoint.com')`.
+App starts at `http://localhost:5173`.
 
-### Environment Variables
-You can customize the build using standard environment variables:
-- `BASE_PATH`: The base URL for the application (default: `/`).
-- `PORT`: The port for the dev server (default: `5173`).
+If PowerShell blocks `npm` scripts, use `npm.cmd`.
 
-## AWS Deployment Tips
+## Build
 
-### AWS Amplify
-- **Build command**: `npm run build`
-- **Output directory**: `artifacts/velago-landing/dist`
+Build all workspaces:
 
-### S3 + CloudFront
-- Sync the contents of `artifacts/velago-landing/dist` to your S3 bucket.
-- Ensure you have a "Fallback" rule in CloudFront to redirect all 404s to `index.html` (standard SPA routing).
+```bash
+npm run build
+```
 
-## Maintenance
+Build only frontend app:
 
-### Updating API Client
-If the `openapi.yaml` changes, you can regenerate the React hooks:
-1. Navigate to `lib/api-spec`.
-2. Run `npx orval`.
+```bash
+npm.cmd run build -w @workspace/velago-landing
+```
+
+## Main routes
+
+- `/` - root (authenticated users are routed to voice page)
+- `/landing` - landing page
+- `/auth` - auth
+- `/voice` - voice assistant page
+- `/bookings` - orders history page
+- `/settings` - settings page
+
+## Runtime configuration
+
+- `VITE_API_URL` (optional) - backend base URL.  
+  Default: `https://api.velago.ai`
+
+Websocket endpoint for voice is currently hardcoded in UI:
+
+- `wss://ws.velago.ai/ws`
+
+## Implemented product behavior
+
+### Voice page
+
+- Displays both assistant and user transcript entries.
+- Handles booking confirmation cards.
+- Supports payment handoff:
+- detects `checkout_url` from structured websocket payload (preferred),
+- fallback: detects payment URL in assistant text.
+- Shows `Pay order` button on confirmed card when payment URL is available.
+- Opens payment in popup/new tab (does not navigate away from current chat tab).
+
+### Orders page (`/bookings`)
+
+- Uses authenticated `GET /orders` API.
+- Sends query params: `category`, `page`, `per_page`.
+- Currently UI exposes only 2 backend categories:
+- `flights`
+- `parcel_delivery`
+- Splits list into sections:
+- `My bookings` for non-final statuses
+- `Past bookings` only for `completed`, `failed`, `canceled/cancelled`
+- Status display mapping:
+- `paid` -> `Paid`
+- payment-required statuses -> `Awaiting Payment`
+- delivery-like in-progress statuses -> `Delivery`
+- flight in-progress statuses -> `In Progress`
+- unknown values -> humanized title case
+- Supports PDF export from real order data in each expanded order row.
+
+## PDF confirmations
+
+Order PDF export is implemented in:
+
+- `app/src/lib/order-confirmation-pdf.ts`
+
+It generates a branded confirmation with:
+
+- order status
+- ids/references
+- provider/service/category
+- total and date
+- available detail rows from order payload
+
+## Backend alignment notes
+
+For stable payment UX, backend should send a dedicated websocket event with checkout link, for example:
+
+```json
+{
+  "type": "PaymentRequiresAction",
+  "requires_action": true,
+  "order_id": "...",
+  "order_token": "...",
+  "checkout_url": "https://sandbox-checkout.revolut.com/payment-link/..."
+}
+```
+
+`ConversationText` should contain human-readable instruction without full URL (to avoid TTS reading long links).
+
+## API codegen
+
+OpenAPI codegen lives in `lib/api-spec`:
+
+```bash
+npm.cmd run codegen -w @workspace/api-spec
+```
+
