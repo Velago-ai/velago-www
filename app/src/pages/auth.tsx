@@ -35,7 +35,10 @@ export default function Auth() {
     if (resetEmail) {
       setEmail(resetEmail);
       setMode("reset-code");
+      return;
     }
+    const modeParam = params.get("mode");
+    if (modeParam === "register") setMode("register");
   }, []);
 
   function switchMode(m: Mode) {

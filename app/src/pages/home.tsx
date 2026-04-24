@@ -180,7 +180,7 @@ export default function Home() {
             <p className="text-2xl font-medium text-foreground mb-8">"{response}"</p>
             <div className="flex gap-4">
               <Button onClick={() => setResponse(null)} variant="outline" className="rounded-full px-6 h-12">Clear</Button>
-              <Button onClick={() => setLocation("/auth")} className="rounded-full px-6 h-12 bg-primary-gradient text-white border-0">Continue Flow</Button>
+              <Button onClick={() => setLocation("/voice")} className="rounded-full px-6 h-12 bg-primary-gradient text-white border-0">Continue Flow</Button>
             </div>
           </div>
         </section>

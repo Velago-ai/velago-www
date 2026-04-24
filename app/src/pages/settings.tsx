@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "@/components/app-layout";
 import { ChevronRight, Pencil, Check, X } from "lucide-react";
 import { signOut, fetchMe, updateMe, requestResetCode } from "@/lib/api-auth";
 import { getAccessToken, clearTokens } from "@/lib/auth";
 import { userStore, useProfile } from "@/lib/user-store";
+import { getMissingProFieldLabels, isFreePlan, isProProfileComplete } from "@/lib/profile-requirements";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -144,7 +145,15 @@ export default function Settings() {
   const [, setLocation] = useLocation();
   const profile = useProfile();
   const [prefs, setPrefs] = useState<Record<string, boolean>>({ Food: true, Flights: true, Hotels: false });
+  const [activatingPro, setActivatingPro] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const autoUpgradeTriggeredRef = useRef(false);
   const togglePref = (k: string) => setPrefs((p) => ({ ...p, [k]: !p[k] }));
+  const requiredMode = new URLSearchParams(window.location.search).get("required");
+  const isForcedProProfile = requiredMode === "pro-profile";
+  const freePlan = isFreePlan(profile);
+  const proProfileComplete = isProProfileComplete(profile);
+  const missingProFields = getMissingProFieldLabels(profile);
 
   // Fetch profile if not loaded yet
   useEffect(() => {
@@ -190,10 +199,59 @@ export default function Settings() {
     await patchField({ saved_addresses: updated });
   };
 
+  const activatePro = async () => {
+    if (!freePlan || !proProfileComplete || activatingPro) return;
+    setUpgradeError(null);
+    setActivatingPro(true);
+    try {
+      await patchField({ plan: "pro" });
+      setLocation("/voice");
+    } catch {
+      autoUpgradeTriggeredRef.current = false;
+      setUpgradeError("Could not activate Pro yet. Please try again.");
+    } finally {
+      setActivatingPro(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!profile || !freePlan || !proProfileComplete) return;
+    if (autoUpgradeTriggeredRef.current || activatingPro) return;
+    autoUpgradeTriggeredRef.current = true;
+    void activatePro();
+  }, [profile, freePlan, proProfileComplete, activatingPro]);
+
   return (
     <AppLayout>
       <div className="px-4 md:px-8 py-6 max-w-2xl w-full mx-auto">
         <h1 className="font-display text-2xl md:text-3xl font-bold mb-6">Settings</h1>
+
+        {freePlan && (
+          <section className="mb-6 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-4">
+            <div className="text-sm font-semibold text-foreground">Complete profile to activate Pro</div>
+            {isForcedProProfile && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Chat is locked for Free plan accounts until the required profile fields are completed.
+              </p>
+            )}
+            {missingProFields.length > 0 ? (
+              <p className="text-xs text-muted-foreground mt-2">
+                Required: {missingProFields.join(", ")}.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-2">All required fields are filled. Activating Pro plan…</p>
+            )}
+            {upgradeError && <p className="text-xs text-destructive mt-2">{upgradeError}</p>}
+            <button
+              type="button"
+              className="mt-3 h-9 px-4 rounded-full bg-primary text-white text-sm font-semibold disabled:opacity-60"
+              onClick={() => void activatePro()}
+              disabled={missingProFields.length > 0 || activatingPro}
+            >
+              {activatingPro ? "Activating…" : "Activate Pro"}
+            </button>
+          </section>
+        )}
 
         <Section title="Payment">
           <Row
