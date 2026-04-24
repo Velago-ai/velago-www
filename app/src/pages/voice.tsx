@@ -215,6 +215,21 @@ function resolveRecentChatSubject(history: ChatHistoryResponse | null): string {
   return firstUserLine ?? "";
 }
 
+function mapChatHistoryToTranscript(
+  history: ChatHistoryResponse | null,
+  nextId: () => string
+): TranscriptEntry[] {
+  if (!history?.transcript?.length) return [];
+  return history.transcript
+    .map((line) => {
+      const content = String(line.text ?? "").trim();
+      if (!content) return null;
+      const role: "user" | "agent" = String(line.role).toLowerCase() === "user" ? "user" : "agent";
+      return { id: nextId(), type: "text", role, content } as TextEntry;
+    })
+    .filter((entry): entry is TextEntry => entry != null);
+}
+
 export default function Voice() {
   const [, setLocation] = useLocation();
 
@@ -246,7 +261,6 @@ export default function Voice() {
   const idCounterRef = useRef(0);
   const paymentUrlRef = useRef<string | null>(null);
   const pendingContinueSessionRef = useRef<string | null>(null);
-  const autoStartMicOnResumeRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   function nextId() { return String(++idCounterRef.current); }
@@ -375,10 +389,6 @@ export default function Voice() {
           })
         );
       }
-      if (autoStartMicOnResumeRef.current && !isRecordingRef.current) {
-        autoStartMicOnResumeRef.current = false;
-        void startRecording();
-      }
     };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) { handleAudio(e.data); return; }
@@ -388,7 +398,6 @@ export default function Voice() {
     ws.onclose = (e) => {
       setStatus(e.code === 1000 ? "disconnected" : "error");
       setIsTyping(false);
-      autoStartMicOnResumeRef.current = false;
       stopRecording();
       resetPlayback();
     };
@@ -426,34 +435,6 @@ export default function Voice() {
     });
   }
 
-  function applyHistoryPayload(msg: Record<string, unknown>) {
-    const candidates = [
-      msg.transcript,
-      msg.history,
-      msg.lines,
-      msg.messages,
-      (msg.payload as Record<string, unknown> | undefined)?.transcript,
-    ];
-    const source = candidates.find((value) => Array.isArray(value)) as unknown[] | undefined;
-    if (!source || source.length === 0) return;
-
-    const rows = source
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-        const row = item as Record<string, unknown>;
-        const content = String(row.text ?? row.content ?? row.message ?? "").trim();
-        if (!content) return null;
-        const rawRole = String(row.role ?? "").toLowerCase();
-        const role: "user" | "agent" = rawRole === "user" ? "user" : "agent";
-        return { id: nextId(), type: "text", role, content } as TextEntry;
-      })
-      .filter((row): row is TextEntry => row != null);
-
-    if (rows.length === 0) return;
-    setIsTyping(false);
-    setTranscript(rows);
-  }
-
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? msg.event ?? "");
     const isPaymentEvent =
@@ -474,10 +455,7 @@ export default function Voice() {
       }
     }
 
-    if (t.toLowerCase() === "history") {
-      applyHistoryPayload(msg);
-      return;
-    }
+    if (t.toLowerCase() === "history") return;
 
     if (t === "ConversationText") {
       const rawRole = String(msg.role ?? "").toLowerCase();
@@ -645,36 +623,39 @@ export default function Voice() {
     connect(plan === "pro" && token ? token : null);
   }
 
-  function continueRecentChat() {
+  async function continueRecentChat() {
     if (isResumingRecentChat) return;
-    const sessionId = recentChat?.session_id;
     const token = getAccessToken();
-    if (!sessionId || !token) return;
+    if (!token) return;
+
+    setIsResumingRecentChat(true);
+    const latestHistory = await fetchChatHistory(token).catch(() => recentChat);
+    if (latestHistory) setRecentChat(latestHistory);
+    const historyForUi = latestHistory ?? recentChat;
+    const sessionId = historyForUi?.session_id;
+    if (!sessionId) {
+      setIsResumingRecentChat(false);
+      return;
+    }
+
+    setTranscript(mapChatHistoryToTranscript(historyForUi, nextId));
+    setIsTyping(false);
 
     const sendContinueEvent = () => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
-      if (pendingContinueSessionRef.current === sessionId) {
-        pendingContinueSessionRef.current = null;
-        wsRef.current.send(
-          JSON.stringify({
-            type: "continueSession",
-            session_id: sessionId,
-            sessionId,
-          })
-        );
-        if (autoStartMicOnResumeRef.current && !isRecordingRef.current) {
-          autoStartMicOnResumeRef.current = false;
-          void startRecording();
-        }
-      }
+      if (pendingContinueSessionRef.current !== sessionId) return true;
+      pendingContinueSessionRef.current = null;
+      wsRef.current.send(
+        JSON.stringify({
+          type: "continueSession",
+          session_id: sessionId,
+          sessionId,
+        })
+      );
       return true;
     };
 
-    autoStartMicOnResumeRef.current = true;
     pendingContinueSessionRef.current = sessionId;
-    setIsResumingRecentChat(true);
-    setTranscript([]);
-    setIsTyping(true);
 
     if (sendContinueEvent()) {
       setIsResumingRecentChat(false);
@@ -693,7 +674,6 @@ export default function Voice() {
       }
       if (Date.now() - startedAt > 10000) {
         pendingContinueSessionRef.current = null;
-        autoStartMicOnResumeRef.current = false;
         setIsResumingRecentChat(false);
         setIsTyping(false);
         pushTextEntry("agent", "Could not continue the previous session. Start a new request.");
