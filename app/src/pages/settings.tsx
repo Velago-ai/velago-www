@@ -144,7 +144,7 @@ function Chip({ active, children, onClick }: { active: boolean; children: React.
 export default function Settings() {
   const [, setLocation] = useLocation();
   const profile = useProfile();
-  const [prefs, setPrefs] = useState<Record<string, boolean>>({ Food: true, Flights: true, Hotels: false });
+  const [prefs, setPrefs] = useState<Record<string, boolean>>({ Flight: true, Parsels: true });
   const [activatingPro, setActivatingPro] = useState(false);
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const autoUpgradeTriggeredRef = useRef(false);
@@ -263,8 +263,6 @@ export default function Settings() {
               </span>
             }
           />
-          <Row label="Credit card" value="Visa ···· 4242 · 09/27" />
-          <Row label="" value={<span className="text-primary font-semibold">+ Add payment method</span>} onClick={() => undefined} />
         </Section>
 
         <Section title="Account">
