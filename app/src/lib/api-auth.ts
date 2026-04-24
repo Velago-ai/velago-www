@@ -41,6 +41,8 @@ async function apiRequest<T>(method: string, path: string, body: unknown, token?
   const res = await fetch(`${BASE}${path}`, { method, headers, body: body != null ? JSON.stringify(body) : undefined });
 
   if (res.status === 401 && token) {
+    // Refresh is temporarily disabled. Uncomment the block below to restore auto-refresh.
+    /*
     // Try refresh once
     try {
       const newToken = await tryRefresh();
@@ -58,6 +60,9 @@ async function apiRequest<T>(method: string, path: string, body: unknown, token?
       forceLogout();
       throw new Error("Session expired");
     }
+    */
+    forceLogout();
+    throw new Error("Session expired");
   }
 
   if (!res.ok) {
