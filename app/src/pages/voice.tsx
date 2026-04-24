@@ -3,8 +3,9 @@ import { useLocation } from "wouter";
 import { Mic, MicOff, Send, Info, User2, CheckCircle2, Pencil } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
 import { getAccessToken, clearTokens } from "@/lib/auth";
-import { fetchMe, signOut } from "@/lib/api-auth";
+import { fetchMe, fetchChatHistory, signOut, type ChatHistoryResponse } from "@/lib/api-auth";
 import { userStore, useProfile } from "@/lib/user-store";
+import { isFreePlan } from "@/lib/profile-requirements";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -60,7 +61,14 @@ interface ConfirmedEntry {
   paymentUrl?: string;
 }
 
-type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry;
+interface SignupOfferEntry {
+  id: string;
+  type: "signup_offer";
+  prompt: string;
+  signupPath: string;
+}
+
+type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | SignupOfferEntry;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -177,6 +185,36 @@ function extractPaymentUrlFromPayload(value: unknown, depth = 0): string | null 
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+function resolveSignupPath(value: unknown): string {
+  const fallback = "/auth?mode=register";
+  if (typeof value !== "string") return fallback;
+  const raw = value.trim();
+  if (!raw) return fallback;
+
+  if (raw.startsWith("/")) {
+    if (!raw.startsWith("/auth")) return fallback;
+    if (/([?&])mode=/.test(raw)) return raw;
+    return `${raw}${raw.includes("?") ? "&" : "?"}mode=register`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.pathname !== "/auth") return fallback;
+    if (!parsed.searchParams.has("mode")) parsed.searchParams.set("mode", "register");
+    const query = parsed.searchParams.toString();
+    return `${parsed.pathname}${query ? `?${query}` : ""}${parsed.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
+function resolveRecentChatSubject(history: ChatHistoryResponse | null): string {
+  const subject = history?.subject?.trim();
+  if (subject) return subject;
+  const firstUserLine = history?.transcript?.find((line) => String(line.role).toLowerCase() === "user")?.text?.trim();
+  return firstUserLine ?? "";
+}
+
 export default function Voice() {
   const [, setLocation] = useLocation();
 
@@ -189,6 +227,9 @@ export default function Voice() {
   const [isTyping, setIsTyping] = useState(false);
   const [textInput, setTextInput] = useState("");
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [recentChat, setRecentChat] = useState<ChatHistoryResponse | null>(null);
+  const [isLoadingRecentChat, setIsLoadingRecentChat] = useState(false);
+  const [isResumingRecentChat, setIsResumingRecentChat] = useState(false);
 
   // Imperative refs — Web Audio + WebSocket (no re-render needed)
   const wsRef = useRef<WebSocket | null>(null);
@@ -214,6 +255,38 @@ export default function Voice() {
     if (token) fetchMe(token).then((p) => userStore.set(p)).catch(() => null);
     return () => { wsRef.current?.close(1000); };
   }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setRecentChat(null);
+      return;
+    }
+    let alive = true;
+    setIsLoadingRecentChat(true);
+    fetchChatHistory(token)
+      .then((history) => {
+        if (!alive) return;
+        setRecentChat(history);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setRecentChat(null);
+      })
+      .finally(() => {
+        if (!alive) return;
+        setIsLoadingRecentChat(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token || !profile) return;
+    if (isFreePlan(profile)) {
+      setLocation("/settings?required=pro-profile");
+    }
+  }, [profile, setLocation]);
 
   // Auto-scroll
   useEffect(() => {
@@ -333,7 +406,7 @@ export default function Voice() {
   }
 
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
-    const t = String(msg.type ?? "");
+    const t = String(msg.type ?? msg.event ?? "");
     const isPaymentEvent =
       t.toLowerCase().includes("payment") ||
       typeof msg.requires_action === "boolean" ||
@@ -362,6 +435,18 @@ export default function Voice() {
         attachPaymentUrlToLatestConfirmed(paymentUrl);
       }
       pushTextEntry(role, content);
+      return;
+    }
+    if (t === "DemoSignupOffer") {
+      setIsTyping(false);
+      const prompt = String(msg.prompt ?? "Would you like to signup?");
+      const signupPath = resolveSignupPath(msg.signup_url ?? msg.signupUrl);
+      pushEntry({
+        id: nextId(),
+        type: "signup_offer",
+        prompt,
+        signupPath,
+      });
       return;
     }
     if (hasNewPaymentUrl) setIsTyping(false);
@@ -506,6 +591,46 @@ export default function Voice() {
     connect(plan === "pro" && token ? token : null);
   }
 
+  function continueRecentChat() {
+    if (isResumingRecentChat) return;
+    const sessionId = recentChat?.session_id;
+    if (!sessionId) return;
+
+    const sendContinueEvent = () => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
+      wsRef.current.send(JSON.stringify({ type: "continueSession", session_id: sessionId }));
+      return true;
+    };
+
+    setIsResumingRecentChat(true);
+    setTranscript([]);
+    setIsTyping(true);
+
+    if (!sendContinueEvent()) {
+      if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+        startSession();
+      }
+      const startedAt = Date.now();
+      const poll = () => {
+        if (sendContinueEvent()) {
+          setIsResumingRecentChat(false);
+          return;
+        }
+        if (Date.now() - startedAt > 8000) {
+          setIsResumingRecentChat(false);
+          setIsTyping(false);
+          pushTextEntry("agent", "Could not continue the previous session. Start a new request.");
+          return;
+        }
+        setTimeout(poll, 150);
+      };
+      setTimeout(poll, 200);
+      return;
+    }
+
+    setIsResumingRecentChat(false);
+  }
+
   // ── Mic ──────────────────────────────────────────────────────────────────
   async function startRecording() {
     try {
@@ -608,6 +733,10 @@ export default function Voice() {
     pushTextEntry("agent", "Please allow pop-ups to open payment, or copy the payment link from support.");
   }
 
+  function signup(path: string) {
+    setLocation(path);
+  }
+
   async function handleLogout() {
     const token = getAccessToken();
     wsRef.current?.close(1000);
@@ -628,6 +757,10 @@ export default function Voice() {
 
   // ── Render ───────────────────────────────────────────────────────────────
   const isIdle = transcript.length === 0 && !isTyping && status === "disconnected";
+  const recentChatSubject = resolveRecentChatSubject(recentChat);
+  const hasAccessToken = Boolean(getAccessToken());
+  const canContinueRecentChat =
+    hasAccessToken && !isLoadingRecentChat && Boolean(recentChat?.session_id && recentChatSubject);
 
   const rightSlot = (
     <button
@@ -646,9 +779,28 @@ export default function Voice() {
         {/* Empty state */}
         {isIdle && (
           <div className="flex-1 flex items-center justify-center vg-fade-up">
-            <p className="text-center text-lg md:text-xl text-muted-foreground font-medium max-w-sm">
+            {canContinueRecentChat ? (
+              <div className="text-center max-w-xl px-3">
+                <p className="text-base md:text-lg text-muted-foreground font-medium">
+                  This is your recent chat:
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 text-lg md:text-xl font-semibold text-primary hover:underline disabled:opacity-60"
+                  onClick={continueRecentChat}
+                  disabled={isResumingRecentChat}
+                >
+                  {recentChatSubject}
+                </button>
+                <p className="mt-3 text-base md:text-lg text-muted-foreground">
+                  You can continue or Tell me what you need вЂ” a flight, a delivery, a dinner reservation. I'll handle the rest.
+                </p>
+              </div>
+            ) : (
+              <p className="text-center text-lg md:text-xl text-muted-foreground font-medium max-w-sm">
               Tell me what you need — a flight, a delivery, a dinner reservation. I'll handle the rest.
             </p>
+            )}
           </div>
         )}
 
@@ -656,7 +808,14 @@ export default function Voice() {
         {!isIdle && (
           <div className="flex-1 min-h-0 overflow-y-auto py-4 flex flex-col gap-3">
             {transcript.map((entry, i) => (
-              <Bubble key={entry.id} entry={entry} index={i} onSelect={selectQuote} onPayOrder={payOrder} />
+              <Bubble
+                key={entry.id}
+                entry={entry}
+                index={i}
+                onSelect={selectQuote}
+                onPayOrder={payOrder}
+                onSignup={signup}
+              />
             ))}
             {isTyping && <TypingDots />}
             <div ref={transcriptEndRef} />
@@ -761,11 +920,13 @@ function Bubble({
   index,
   onSelect,
   onPayOrder,
+  onSignup,
 }: {
   entry: TranscriptEntry;
   index: number;
   onSelect?: (provider: string, price: string, currency: string) => void;
   onPayOrder?: (url: string) => void;
+  onSignup?: (path: string) => void;
 }) {
   const delay = `${Math.min(index, 6) * 50}ms`;
 
@@ -850,6 +1011,26 @@ function Bubble({
           )}
           <div className="mt-3 flex justify-end">
             <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry.provider, entry.price, entry.currency); }}>Select</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "signup_offer") {
+    return (
+      <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className="vg-card flex-1 p-4">
+          <p className="text-sm text-foreground">{entry.prompt}</p>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              className="vg-btn-primary py-2 px-5 text-sm"
+              onClick={() => onSignup?.(entry.signupPath)}
+            >
+              Sign up
+            </button>
           </div>
         </div>
       </div>

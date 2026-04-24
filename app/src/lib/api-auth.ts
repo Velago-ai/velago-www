@@ -181,3 +181,28 @@ export function listOrders(token: string, params: ListOrdersParams = {}): Promis
   const qs = q.toString();
   return apiRequest("GET", `/orders${qs ? `?${qs}` : ""}`, null, token);
 }
+
+export type ChatTranscriptLine = {
+  role: string;
+  text: string;
+};
+
+export type ChatHistoryResponse = {
+  session_id: string;
+  user_id: string;
+  subject: string | null;
+  status: string | null;
+  session_started_at: number | null;
+  session_ended_at: number | null;
+  transcript: ChatTranscriptLine[];
+};
+
+export async function fetchChatHistory(token: string): Promise<ChatHistoryResponse | null> {
+  try {
+    return await apiRequest<ChatHistoryResponse>("GET", "/services/chat_history", null, token);
+  } catch (err) {
+    const message = (err as Error)?.message ?? "";
+    if (/chat history not found|not found/i.test(message)) return null;
+    throw err;
+  }
+}
