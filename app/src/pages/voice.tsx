@@ -245,6 +245,7 @@ export default function Voice() {
   const isRecordingRef = useRef(false);
   const idCounterRef = useRef(0);
   const paymentUrlRef = useRef<string | null>(null);
+  const pendingContinueSessionRef = useRef<string | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   function nextId() { return String(++idCounterRef.current); }
@@ -359,7 +360,21 @@ export default function Voice() {
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
-    ws.onopen = () => { setStatus("connected"); setIsTyping(true); };
+    ws.onopen = () => {
+      setStatus("connected");
+      setIsTyping(true);
+      const pendingSessionId = pendingContinueSessionRef.current;
+      if (pendingSessionId) {
+        pendingContinueSessionRef.current = null;
+        ws.send(
+          JSON.stringify({
+            type: "continueSession",
+            session_id: pendingSessionId,
+            sessionId: pendingSessionId,
+          })
+        );
+      }
+    };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) { handleAudio(e.data); return; }
       if (e.data instanceof Blob) { void e.data.arrayBuffer().then(handleAudio); return; }
@@ -594,41 +609,54 @@ export default function Voice() {
   function continueRecentChat() {
     if (isResumingRecentChat) return;
     const sessionId = recentChat?.session_id;
-    if (!sessionId) return;
+    const token = getAccessToken();
+    if (!sessionId || !token) return;
 
     const sendContinueEvent = () => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
-      wsRef.current.send(JSON.stringify({ type: "continueSession", session_id: sessionId }));
+      if (pendingContinueSessionRef.current === sessionId) {
+        pendingContinueSessionRef.current = null;
+        wsRef.current.send(
+          JSON.stringify({
+            type: "continueSession",
+            session_id: sessionId,
+            sessionId,
+          })
+        );
+      }
       return true;
     };
 
+    pendingContinueSessionRef.current = sessionId;
     setIsResumingRecentChat(true);
     setTranscript([]);
     setIsTyping(true);
 
-    if (!sendContinueEvent()) {
-      if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
-        startSession();
-      }
-      const startedAt = Date.now();
-      const poll = () => {
-        if (sendContinueEvent()) {
-          setIsResumingRecentChat(false);
-          return;
-        }
-        if (Date.now() - startedAt > 8000) {
-          setIsResumingRecentChat(false);
-          setIsTyping(false);
-          pushTextEntry("agent", "Could not continue the previous session. Start a new request.");
-          return;
-        }
-        setTimeout(poll, 150);
-      };
-      setTimeout(poll, 200);
+    if (sendContinueEvent()) {
+      setIsResumingRecentChat(false);
       return;
     }
 
-    setIsResumingRecentChat(false);
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+      connect(token);
+    }
+
+    const startedAt = Date.now();
+    const poll = () => {
+      if (sendContinueEvent()) {
+        setIsResumingRecentChat(false);
+        return;
+      }
+      if (Date.now() - startedAt > 10000) {
+        pendingContinueSessionRef.current = null;
+        setIsResumingRecentChat(false);
+        setIsTyping(false);
+        pushTextEntry("agent", "Could not continue the previous session. Start a new request.");
+        return;
+      }
+      setTimeout(poll, 150);
+    };
+    setTimeout(poll, 150);
   }
 
   // ── Mic ──────────────────────────────────────────────────────────────────
@@ -792,14 +820,22 @@ export default function Voice() {
                 >
                   {recentChatSubject}
                 </button>
-                <p className="mt-3 text-base md:text-lg text-muted-foreground">
+                <p className="hidden mt-3 text-base md:text-lg text-muted-foreground">
                   You can continue or Tell me what you need вЂ” a flight, a delivery, a dinner reservation. I'll handle the rest.
+                </p>
+                <p className="mt-3 text-base md:text-lg text-muted-foreground">
+                  You can continue or Tell me what you need - a flight, a delivery, a dinner reservation. I'll handle the rest.
                 </p>
               </div>
             ) : (
-              <p className="text-center text-lg md:text-xl text-muted-foreground font-medium max-w-sm">
+              <>
+              <p className="hidden text-center text-lg md:text-xl text-muted-foreground font-medium max-w-sm">
               Tell me what you need — a flight, a delivery, a dinner reservation. I'll handle the rest.
             </p>
+              <p className="text-center text-lg md:text-xl text-muted-foreground font-medium max-w-sm">
+                Tell me what you need - a flight, a delivery, a dinner reservation. I'll handle the rest.
+              </p>
+              </>
             )}
           </div>
         )}
