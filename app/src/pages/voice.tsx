@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useLocation } from "wouter";
-import { Mic, MicOff, Send, Info, User2, CheckCircle2, Pencil } from "lucide-react";
+import { Mic, MicOff, Send, Info, User2, CheckCircle2, Pencil, Check, X } from "lucide-react";
 import { AppLayout } from "@/components/app-layout";
 import { getAccessToken, clearTokens } from "@/lib/auth";
 import { fetchMe, fetchChatHistory, signOut, type ChatHistoryResponse } from "@/lib/api-auth";
@@ -35,7 +35,7 @@ interface ReviewEntry {
   id: string;
   type: "review";
   title: string;
-  rows: { label: string; value: string; empty: boolean }[];
+  rows: { fieldKey: string; label: string; value: string; empty: boolean }[];
 }
 
 interface QuoteEntry {
@@ -435,6 +435,46 @@ export default function Voice() {
     });
   }
 
+  function applyLocalReviewEdit(reviewId: string, fieldKey: string, value: string) {
+    const nextValue = value.trim();
+    if (!nextValue) return;
+    setTranscript((prev) =>
+      prev.map((entry) => {
+        if (entry.type !== "review" || entry.id !== reviewId) return entry;
+        return {
+          ...entry,
+          rows: entry.rows.map((row) =>
+            row.fieldKey === fieldKey ? { ...row, value: nextValue, empty: false } : row
+          ),
+        };
+      })
+    );
+  }
+
+  function editReviewField(
+    entry: ReviewEntry,
+    row: ReviewEntry["rows"][number],
+    draftValue: string
+  ) {
+    const value = draftValue.trim();
+    if (!value) return;
+    const text = `Fix ${row.fieldKey} to ${value}`;
+    applyLocalReviewEdit(entry.id, row.fieldKey, value);
+
+    if (!wsRef.current || wsRef.current.readyState !== 1) {
+      pushTextEntry("user", text);
+      setIsTyping(true);
+      setTimeout(() => {
+        pushTextEntry("agent", "Connect to start a session - tap the mic to begin.");
+      }, 600);
+      return;
+    }
+
+    wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
+    pushTextEntry("user", text);
+    setIsTyping(true);
+  }
+
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? msg.event ?? "");
     const isPaymentEvent =
@@ -566,7 +606,7 @@ export default function Voice() {
       rows: fields.map(([key, label]) => {
         const val = data[key];
         const hasValue = Boolean(val && val !== "null");
-        return { label, value: hasValue ? val : "—", empty: !hasValue };
+        return { fieldKey: key, label, value: hasValue ? val : "—", empty: !hasValue };
       }),
     };
   }
@@ -876,6 +916,7 @@ export default function Voice() {
                 onSelect={selectQuote}
                 onPayOrder={payOrder}
                 onSignup={signup}
+                onEditField={editReviewField}
               />
             ))}
             {isTyping && <TypingDots />}
@@ -982,14 +1023,23 @@ function Bubble({
   onSelect,
   onPayOrder,
   onSignup,
+  onEditField,
 }: {
   entry: TranscriptEntry;
   index: number;
   onSelect?: (provider: string, price: string, currency: string) => void;
   onPayOrder?: (url: string) => void;
   onSignup?: (path: string) => void;
+  onEditField?: (entry: ReviewEntry, row: ReviewEntry["rows"][number], value: string) => void;
 }) {
   const delay = `${Math.min(index, 6) * 50}ms`;
+  const [editingFieldKey, setEditingFieldKey] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+
+  useEffect(() => {
+    setEditingFieldKey(null);
+    setEditingValue("");
+  }, [entry.id]);
 
   if (entry.type === "text") {
     if (entry.role === "user") {
@@ -1033,16 +1083,68 @@ function Bubble({
           </div>
           <div className="divide-y divide-border">
             {entry.rows.map((r) => (
-              <div key={r.label} className="flex items-center gap-3 py-2 text-sm">
+              <div key={r.fieldKey} className="flex items-center gap-3 py-2 text-sm">
                 <span className="text-xs uppercase tracking-wide text-muted-foreground font-semibold w-24 shrink-0">
                   {r.label}
                 </span>
-                <span className={`flex-1 ${r.empty ? "italic text-muted-foreground" : "font-semibold text-foreground"}`}>
-                  {r.empty ? "—" : r.value}
-                </span>
-                <button className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10">
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
+                {editingFieldKey === r.fieldKey ? (
+                  <input
+                    autoFocus
+                    value={editingValue}
+                    onChange={(e) => setEditingValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const value = editingValue.trim();
+                        if (value) onEditField?.(entry, r, value);
+                        setEditingFieldKey(null);
+                      } else if (e.key === "Escape") {
+                        setEditingFieldKey(null);
+                      }
+                    }}
+                    className="flex-1 min-w-0 border border-border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    placeholder={r.label}
+                  />
+                ) : (
+                  <span className={`flex-1 min-w-0 ${r.empty ? "text-muted-foreground italic" : "text-foreground"}`}>
+                    {r.empty ? "—" : r.value}
+                  </span>
+                )}
+                {editingFieldKey === r.fieldKey ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      className="p-1.5 rounded-full text-primary hover:bg-primary/10"
+                      onClick={() => {
+                        const value = editingValue.trim();
+                        if (value) onEditField?.(entry, r, value);
+                        setEditingFieldKey(null);
+                      }}
+                      aria-label={`Save ${r.label}`}
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="p-1.5 rounded-full text-muted-foreground hover:bg-muted"
+                      onClick={() => setEditingFieldKey(null)}
+                      aria-label={`Cancel editing ${r.label}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10"
+                    onClick={() => {
+                      setEditingFieldKey(r.fieldKey);
+                      setEditingValue(r.empty ? "" : r.value);
+                    }}
+                    aria-label={`Edit ${r.label}`}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1099,6 +1201,7 @@ function Bubble({
   }
 
   if (entry.type === "confirmed") {
+    const paymentUrl = entry.paymentUrl;
     return (
       <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
         <VelaAvatar />
@@ -1113,11 +1216,11 @@ function Bubble({
           {entry.orderId && (
             <div className="text-xs text-muted-foreground mt-1 break-all">Reference: {entry.orderId}</div>
           )}
-          {entry.paymentUrl && (
+          {paymentUrl && (
             <button
               type="button"
               className="vg-btn-primary mt-4 text-sm"
-              onClick={() => onPayOrder?.(entry.paymentUrl)}
+              onClick={() => onPayOrder?.(paymentUrl)}
             >
               Pay order
             </button>
