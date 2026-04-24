@@ -1041,6 +1041,11 @@ function Bubble({
     setEditingValue("");
   }, [entry.id]);
 
+  function startInlineEdit(row: ReviewEntry["rows"][number]) {
+    setEditingFieldKey(row.fieldKey);
+    setEditingValue(row.empty ? "" : row.value);
+  }
+
   if (entry.type === "text") {
     if (entry.role === "user") {
       return (
@@ -1105,9 +1110,20 @@ function Bubble({
                     placeholder={r.label}
                   />
                 ) : (
-                  <span className={`flex-1 min-w-0 ${r.empty ? "text-muted-foreground italic" : "text-foreground"}`}>
+                  <button
+                    type="button"
+                    className={`flex-1 min-w-0 text-left ${r.empty ? "text-muted-foreground italic" : "text-foreground"}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      startInlineEdit(r);
+                    }}
+                    aria-label={`Edit ${r.label}`}
+                    title={`Edit ${r.label}`}
+                  >
                     {r.empty ? "—" : r.value}
-                  </span>
+                  </button>
                 )}
                 {editingFieldKey === r.fieldKey ? (
                   <div className="flex items-center gap-1 shrink-0">
@@ -1136,11 +1152,14 @@ function Bubble({
                   <button
                     type="button"
                     className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10"
-                    onClick={() => {
-                      setEditingFieldKey(r.fieldKey);
-                      setEditingValue(r.empty ? "" : r.value);
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      startInlineEdit(r);
                     }}
                     aria-label={`Edit ${r.label}`}
+                    title={`Edit ${r.label}`}
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
