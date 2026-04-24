@@ -246,6 +246,7 @@ export default function Voice() {
   const idCounterRef = useRef(0);
   const paymentUrlRef = useRef<string | null>(null);
   const pendingContinueSessionRef = useRef<string | null>(null);
+  const autoStartMicOnResumeRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   function nextId() { return String(++idCounterRef.current); }
@@ -374,6 +375,10 @@ export default function Voice() {
           })
         );
       }
+      if (autoStartMicOnResumeRef.current && !isRecordingRef.current) {
+        autoStartMicOnResumeRef.current = false;
+        void startRecording();
+      }
     };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) { handleAudio(e.data); return; }
@@ -383,6 +388,7 @@ export default function Voice() {
     ws.onclose = (e) => {
       setStatus(e.code === 1000 ? "disconnected" : "error");
       setIsTyping(false);
+      autoStartMicOnResumeRef.current = false;
       stopRecording();
       resetPlayback();
     };
@@ -420,6 +426,34 @@ export default function Voice() {
     });
   }
 
+  function applyHistoryPayload(msg: Record<string, unknown>) {
+    const candidates = [
+      msg.transcript,
+      msg.history,
+      msg.lines,
+      msg.messages,
+      (msg.payload as Record<string, unknown> | undefined)?.transcript,
+    ];
+    const source = candidates.find((value) => Array.isArray(value)) as unknown[] | undefined;
+    if (!source || source.length === 0) return;
+
+    const rows = source
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const content = String(row.text ?? row.content ?? row.message ?? "").trim();
+        if (!content) return null;
+        const rawRole = String(row.role ?? "").toLowerCase();
+        const role: "user" | "agent" = rawRole === "user" ? "user" : "agent";
+        return { id: nextId(), type: "text", role, content } as TextEntry;
+      })
+      .filter((row): row is TextEntry => row != null);
+
+    if (rows.length === 0) return;
+    setIsTyping(false);
+    setTranscript(rows);
+  }
+
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? msg.event ?? "");
     const isPaymentEvent =
@@ -438,6 +472,11 @@ export default function Voice() {
       if (isPaymentEvent && t !== "ConversationText") {
         pushTextEntry("agent", "Payment link is ready. Tap Pay order to complete checkout.");
       }
+    }
+
+    if (t.toLowerCase() === "history") {
+      applyHistoryPayload(msg);
+      return;
     }
 
     if (t === "ConversationText") {
@@ -623,10 +662,15 @@ export default function Voice() {
             sessionId,
           })
         );
+        if (autoStartMicOnResumeRef.current && !isRecordingRef.current) {
+          autoStartMicOnResumeRef.current = false;
+          void startRecording();
+        }
       }
       return true;
     };
 
+    autoStartMicOnResumeRef.current = true;
     pendingContinueSessionRef.current = sessionId;
     setIsResumingRecentChat(true);
     setTranscript([]);
@@ -649,6 +693,7 @@ export default function Voice() {
       }
       if (Date.now() - startedAt > 10000) {
         pendingContinueSessionRef.current = null;
+        autoStartMicOnResumeRef.current = false;
         setIsResumingRecentChat(false);
         setIsTyping(false);
         pushTextEntry("agent", "Could not continue the previous session. Start a new request.");
