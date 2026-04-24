@@ -457,11 +457,20 @@ export default function Voice() {
     draftValue: string
   ) {
     const value = draftValue.trim();
+    console.debug("[voice][review-edit] editReviewField called", {
+      reviewId: entry.id,
+      fieldKey: row.fieldKey,
+      draftValue,
+      value,
+      hasWs: Boolean(wsRef.current),
+      wsState: wsRef.current?.readyState,
+    });
     if (!value) return;
     const text = `Fix ${row.fieldKey} to ${value}`;
     applyLocalReviewEdit(entry.id, row.fieldKey, value);
 
     if (!wsRef.current || wsRef.current.readyState !== 1) {
+      console.debug("[voice][review-edit] ws not ready, fallback message", { text });
       pushTextEntry("user", text);
       setIsTyping(true);
       setTimeout(() => {
@@ -470,6 +479,7 @@ export default function Voice() {
       return;
     }
 
+    console.debug("[voice][review-edit] sending InjectUserMessage", { text });
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
     pushTextEntry("user", text);
     setIsTyping(true);
@@ -1037,11 +1047,28 @@ function Bubble({
   const [editingValue, setEditingValue] = useState("");
 
   useEffect(() => {
+    console.debug("[voice][review-edit] reset inline edit state by entry.id change", { entryId: entry.id });
     setEditingFieldKey(null);
     setEditingValue("");
   }, [entry.id]);
 
+  useEffect(() => {
+    if (entry.type !== "review") return;
+    console.debug("[voice][review-edit] state changed", {
+      entryId: entry.id,
+      editingFieldKey,
+      editingValue,
+    });
+  }, [entry.type, entry.id, editingFieldKey, editingValue]);
+
   function startInlineEdit(row: ReviewEntry["rows"][number]) {
+    console.debug("[voice][review-edit] startInlineEdit", {
+      entryId: entry.id,
+      rowFieldKey: row.fieldKey,
+      rowValue: row.value,
+      rowEmpty: row.empty,
+      hasOnEditField: Boolean(onEditField),
+    });
     setEditingFieldKey(row.fieldKey);
     setEditingValue(row.empty ? "" : row.value);
   }
@@ -1098,6 +1125,12 @@ function Bubble({
                     value={editingValue}
                     onChange={(e) => setEditingValue(e.target.value)}
                     onKeyDown={(e) => {
+                      console.debug("[voice][review-edit] input keydown", {
+                        entryId: entry.id,
+                        fieldKey: r.fieldKey,
+                        key: e.key,
+                        currentValue: editingValue,
+                      });
                       if (e.key === "Enter") {
                         const value = editingValue.trim();
                         if (value) onEditField?.(entry, r, value);
@@ -1115,6 +1148,10 @@ function Bubble({
                     className={`flex-1 min-w-0 text-left ${r.empty ? "text-muted-foreground italic" : "text-foreground"}`}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => {
+                      console.debug("[voice][review-edit] value clicked", {
+                        entryId: entry.id,
+                        fieldKey: r.fieldKey,
+                      });
                       e.preventDefault();
                       e.stopPropagation();
                       startInlineEdit(r);
@@ -1131,6 +1168,11 @@ function Bubble({
                       type="button"
                       className="p-1.5 rounded-full text-primary hover:bg-primary/10"
                       onClick={() => {
+                        console.debug("[voice][review-edit] save clicked", {
+                          entryId: entry.id,
+                          fieldKey: r.fieldKey,
+                          currentValue: editingValue,
+                        });
                         const value = editingValue.trim();
                         if (value) onEditField?.(entry, r, value);
                         setEditingFieldKey(null);
@@ -1142,7 +1184,13 @@ function Bubble({
                     <button
                       type="button"
                       className="p-1.5 rounded-full text-muted-foreground hover:bg-muted"
-                      onClick={() => setEditingFieldKey(null)}
+                      onClick={() => {
+                        console.debug("[voice][review-edit] cancel clicked", {
+                          entryId: entry.id,
+                          fieldKey: r.fieldKey,
+                        });
+                        setEditingFieldKey(null);
+                      }}
                       aria-label={`Cancel editing ${r.label}`}
                     >
                       <X className="w-3.5 h-3.5" />
@@ -1154,6 +1202,10 @@ function Bubble({
                     className="p-1.5 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => {
+                      console.debug("[voice][review-edit] pencil clicked", {
+                        entryId: entry.id,
+                        fieldKey: r.fieldKey,
+                      });
                       e.preventDefault();
                       e.stopPropagation();
                       startInlineEdit(r);
