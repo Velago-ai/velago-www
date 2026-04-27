@@ -4,6 +4,7 @@ import { Mic, MicOff, Send, Info, User2, CheckCircle2, Pencil, Check, X } from "
 import { AppLayout } from "@/components/app-layout";
 import { getAccessToken, clearTokens } from "@/lib/auth";
 import { fetchMe, fetchChatHistory, signOut, type ChatHistoryResponse } from "@/lib/api-auth";
+import { consumePendingReorderFlow, REORDER_CHAT_MESSAGE } from "@/lib/reorder-flow";
 import { userStore, useProfile } from "@/lib/user-store";
 import { isFreePlan } from "@/lib/profile-requirements";
 import velagoLogo from "@assets/velago_logo_nobg.svg";
@@ -69,6 +70,11 @@ interface SignupOfferEntry {
 }
 
 type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | SignupOfferEntry;
+
+interface PendingAutoMessage {
+  text: string;
+  echoUserBubble: boolean;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -270,6 +276,8 @@ export default function Voice() {
   const idCounterRef = useRef(0);
   const paymentUrlRef = useRef<string | null>(null);
   const pendingContinueSessionRef = useRef<string | null>(null);
+  const pendingAutoMessageRef = useRef<PendingAutoMessage | null>(null);
+  const autoReorderStartedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   function nextId() { return String(++idCounterRef.current); }
@@ -312,6 +320,44 @@ export default function Voice() {
       setLocation("/settings?required=pro-profile");
     }
   }, [profile, setLocation]);
+
+  useEffect(() => {
+    if (autoReorderStartedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reorder") !== "last") return;
+
+    autoReorderStartedRef.current = true;
+    const pendingFlow = consumePendingReorderFlow();
+    pendingAutoMessageRef.current = {
+      text: pendingFlow?.message?.trim() || REORDER_CHAT_MESSAGE,
+      echoUserBubble: true,
+    };
+    setTranscript([]);
+    setIsTyping(true);
+
+    if (sendPendingAutoMessage()) return;
+
+    const token = getAccessToken();
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+      connect(token);
+      return;
+    }
+
+    if (wsRef.current.readyState === WebSocket.CONNECTING) return;
+
+    const startedAt = Date.now();
+    const poll = () => {
+      if (sendPendingAutoMessage()) return;
+      if (Date.now() - startedAt > 10000) {
+        pendingAutoMessageRef.current = null;
+        setIsTyping(false);
+        pushTextEntry("agent", "Could not start reorder chat automatically. Tap the mic and try again.");
+        return;
+      }
+      setTimeout(poll, 150);
+    };
+    setTimeout(poll, 150);
+  }, []);
 
   // Auto-scroll
   useEffect(() => {
@@ -376,6 +422,19 @@ export default function Voice() {
     if (playCtxRef.current) { playCtxRef.current.close(); playCtxRef.current = null; }
   }
 
+  function sendPendingAutoMessage(): boolean {
+    const pending = pendingAutoMessageRef.current;
+    const text = pending?.text.trim();
+    if (!text) return true;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
+
+    wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
+    if (pending.echoUserBubble) pushTextEntry("user", text);
+    pendingAutoMessageRef.current = null;
+    setIsTyping(true);
+    return true;
+  }
+
   // ── WebSocket ────────────────────────────────────────────────────────────
   function connect(token: string | null) {
     void primePlayback();
@@ -398,6 +457,7 @@ export default function Voice() {
           })
         );
       }
+      sendPendingAutoMessage();
     };
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) { handleAudio(e.data); return; }
@@ -822,6 +882,37 @@ export default function Voice() {
     setIsTyping(true);
   }
 
+  function sendTypedText(e: React.FormEvent) {
+    e.preventDefault();
+    const text = textInput.trim();
+    if (!text) return;
+
+    pushTextEntry("user", text);
+    setTextInput("");
+    setIsTyping(true);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
+      return;
+    }
+
+    pendingAutoMessageRef.current = { text, echoUserBubble: false };
+    if (sendPendingAutoMessage()) return;
+
+    const token = getAccessToken();
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+      connect(token);
+    }
+
+    setTimeout(() => {
+      if (pendingAutoMessageRef.current?.text === text) {
+        pendingAutoMessageRef.current = null;
+        setIsTyping(false);
+        pushTextEntry("agent", "Could not connect to chat. Tap to speak or try again.");
+      }
+    }, 10000);
+  }
+
   function selectQuote(provider: string, price: string, currency: string) {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
     const text = `Yes, ${provider} for ${price} ${currency}`;
@@ -980,7 +1071,7 @@ export default function Voice() {
         </div>
 
         {/* Text input */}
-        <form onSubmit={sendText} className="flex items-center gap-2 mt-1">
+        <form onSubmit={sendTypedText} className="flex items-center gap-2 mt-1">
           <div className="relative flex-1">
             <input
               value={textInput}
