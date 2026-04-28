@@ -857,6 +857,24 @@ export default function Voice() {
     if (isRecording) stopRecording(); else void startRecording();
   }
 
+  function autoStartMicFromTyping() {
+    if (isRecordingRef.current) return;
+
+    const tryStart = () => {
+      if (isRecordingRef.current) return;
+      if (!wsRef.current) return;
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        void startRecording();
+        return;
+      }
+      if (wsRef.current.readyState === WebSocket.CONNECTING) {
+        setTimeout(tryStart, 200);
+      }
+    };
+
+    setTimeout(tryStart, 250);
+  }
+
   function sendText(e: React.FormEvent) {
     e.preventDefault();
     const text = textInput.trim();
@@ -886,6 +904,7 @@ export default function Voice() {
     e.preventDefault();
     const text = textInput.trim();
     if (!text) return;
+    const shouldAutoStartMic = transcript.length === 0 && !isRecordingRef.current;
 
     pushTextEntry("user", text);
     setTextInput("");
@@ -893,6 +912,7 @@ export default function Voice() {
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
+      if (shouldAutoStartMic) autoStartMicFromTyping();
       return;
     }
 
@@ -903,6 +923,7 @@ export default function Voice() {
     if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
       connect(token);
     }
+    if (shouldAutoStartMic) autoStartMicFromTyping();
 
     setTimeout(() => {
       if (pendingAutoMessageRef.current?.text === text) {
