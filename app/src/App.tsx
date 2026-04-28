@@ -16,6 +16,14 @@ function RootPage() {
   return isAuthenticated() ? <Voice /> : <Home />;
 }
 
+function BookingsRoute() {
+  return isAuthenticated() ? <Bookings /> : <Voice />;
+}
+
+function SettingsRoute() {
+  return isAuthenticated() ? <Settings /> : <Voice />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -23,8 +31,8 @@ function Router() {
       <Route path="/landing" component={Home} />
       <Route path="/auth" component={Auth} />
       <Route path="/voice" component={Voice} />
-      <Route path="/bookings" component={Bookings} />
-      <Route path="/settings" component={Settings} />
+      <Route path="/bookings" component={BookingsRoute} />
+      <Route path="/settings" component={SettingsRoute} />
       <Route component={NotFound} />
     </Switch>
   );
