@@ -277,10 +277,35 @@ export default function Voice() {
   const paymentUrlRef = useRef<string | null>(null);
   const pendingContinueSessionRef = useRef<string | null>(null);
   const pendingAutoMessageRef = useRef<PendingAutoMessage | null>(null);
+  const pendingUserEchoesRef = useRef<Map<string, number>>(new Map());
   const autoReorderStartedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   function nextId() { return String(++idCounterRef.current); }
+
+  function normalizeUserTextForEcho(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function markPendingUserEcho(value: string) {
+    const normalized = normalizeUserTextForEcho(value);
+    if (!normalized) return;
+    const now = Date.now();
+    const expiresAt = now + 15000;
+    pendingUserEchoesRef.current.set(normalized, expiresAt);
+    for (const [key, ttl] of pendingUserEchoesRef.current) {
+      if (ttl < now) pendingUserEchoesRef.current.delete(key);
+    }
+  }
+
+  function shouldSkipPendingUserEcho(value: string): boolean {
+    const normalized = normalizeUserTextForEcho(value);
+    if (!normalized) return false;
+    const ttl = pendingUserEchoesRef.current.get(normalized);
+    if (!ttl) return false;
+    pendingUserEchoesRef.current.delete(normalized);
+    return ttl >= Date.now();
+  }
 
   // ── Auth load (best-effort) ──────────────────────────────────────────────
   useEffect(() => {
@@ -428,6 +453,7 @@ export default function Voice() {
     if (!text) return true;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
 
+    markPendingUserEcho(text);
     wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
     if (pending.echoUserBubble) pushTextEntry("user", text);
     pendingAutoMessageRef.current = null;
@@ -549,6 +575,7 @@ export default function Voice() {
     }
 
     debugReviewEdit("sending InjectUserMessage", { text });
+    markPendingUserEcho(text);
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
     pushTextEntry("user", text);
     setIsTyping(true);
@@ -580,6 +607,7 @@ export default function Voice() {
       const rawRole = String(msg.role ?? "").toLowerCase();
       const role: "user" | "agent" = rawRole === "user" ? "user" : "agent";
       const content = String(msg.content ?? msg.text ?? "");
+      if (role === "user" && shouldSkipPendingUserEcho(content)) return;
       const paymentUrl = extractPaymentUrl(content);
       if (paymentUrl && paymentUrl !== paymentUrlRef.current) {
         paymentUrlRef.current = paymentUrl;
@@ -894,6 +922,7 @@ export default function Voice() {
       }, 600);
       return;
     }
+    markPendingUserEcho(text);
     wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
     pushEntry({ id: nextId(), type: "text", role: "user", content: text });
     setTextInput("");
@@ -905,6 +934,7 @@ export default function Voice() {
     const text = textInput.trim();
     if (!text) return;
     const shouldAutoStartMic = transcript.length === 0 && !isRecordingRef.current;
+    markPendingUserEcho(text);
 
     pushTextEntry("user", text);
     setTextInput("");
@@ -937,6 +967,7 @@ export default function Voice() {
   function selectQuote(provider: string, price: string, currency: string) {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
     const text = `Yes, ${provider} for ${price} ${currency}`;
+    markPendingUserEcho(text);
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
     pushEntry({ id: nextId(), type: "text", role: "user", content: text });
     setIsTyping(true);
