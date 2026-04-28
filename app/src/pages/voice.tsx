@@ -71,6 +71,12 @@ interface OrderStatusEntry {
   updatedAtEpochMs?: number;
 }
 
+interface PayActionEntry {
+  id: string;
+  type: "pay_action";
+  paymentUrl: string;
+}
+
 interface SignupOfferEntry {
   id: string;
   type: "signup_offer";
@@ -78,7 +84,7 @@ interface SignupOfferEntry {
   signupPath: string;
 }
 
-type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | OrderStatusEntry | SignupOfferEntry;
+type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | OrderStatusEntry | PayActionEntry | SignupOfferEntry;
 
 interface PendingAutoMessage {
   text: string;
@@ -214,6 +220,40 @@ function humanizeStatusValue(raw: string): string {
   return titleCaseWords(normalized);
 }
 
+function normalizeShortUserIntent(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function isPaymentConfirmationText(value: string): boolean {
+  const text = normalizeShortUserIntent(value);
+  if (!text) return false;
+  const exact = new Set([
+    "yes",
+    "yep",
+    "yeah",
+    "sure",
+    "ok",
+    "okay",
+    "go ahead",
+    "confirm",
+    "pay",
+    "pay now",
+    "да",
+    "ага",
+    "ок",
+    "хорошо",
+    "подтверждаю",
+    "оплатить",
+    "оплатить сейчас",
+  ]);
+  if (exact.has(text)) return true;
+  return text.startsWith("yes ") || text.startsWith("да ");
+}
+
 function resolveSignupPath(value: unknown): string {
   const fallback = "/auth?mode=register";
   if (typeof value !== "string") return fallback;
@@ -298,6 +338,7 @@ export default function Voice() {
   const isRecordingRef = useRef(false);
   const idCounterRef = useRef(0);
   const paymentUrlRef = useRef<string | null>(null);
+  const shownPayActionUrlsRef = useRef<Set<string>>(new Set());
   const pendingContinueSessionRef = useRef<string | null>(null);
   const pendingAutoMessageRef = useRef<PendingAutoMessage | null>(null);
   const pendingUserEchoesRef = useRef<Map<string, number>>(new Map());
@@ -472,7 +513,8 @@ export default function Voice() {
 
   function sendPendingAutoMessage(): boolean {
     const pending = pendingAutoMessageRef.current;
-    const text = pending?.text.trim();
+    if (!pending) return true;
+    const text = pending.text.trim();
     if (!text) return true;
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
 
@@ -566,7 +608,18 @@ export default function Voice() {
     setTranscript((prev) => {
       const last = prev[prev.length - 1];
       if (last?.type === "text" && last.role === role && last.content.trim() === text) return prev;
-      return [...prev, { id: nextId(), type: "text", role, content: text }];
+      const next: TranscriptEntry[] = [...prev, { id: nextId(), type: "text", role, content: text }];
+      const paymentUrl = paymentUrlRef.current;
+      if (
+        role === "user" &&
+        paymentUrl &&
+        isPaymentConfirmationText(text) &&
+        !shownPayActionUrlsRef.current.has(paymentUrl)
+      ) {
+        shownPayActionUrlsRef.current.add(paymentUrl);
+        next.push({ id: nextId(), type: "pay_action", paymentUrl });
+      }
+      return next;
     });
   }
 
@@ -637,22 +690,12 @@ export default function Voice() {
 
   const handleEvent = useCallback((msg: Record<string, unknown>) => {
     const t = String(msg.type ?? msg.event ?? "");
-    const isPaymentEvent =
-      t.toLowerCase().includes("payment") ||
-      typeof msg.requires_action === "boolean" ||
-      msg.checkout_url != null ||
-      msg.checkoutUrl != null ||
-      msg.order_token != null ||
-      msg.orderToken != null;
     const payloadPaymentUrl = extractPaymentUrlFromPayload(msg);
     const hasNewPaymentUrl =
       Boolean(payloadPaymentUrl) && payloadPaymentUrl !== paymentUrlRef.current;
     if (hasNewPaymentUrl && payloadPaymentUrl) {
       paymentUrlRef.current = payloadPaymentUrl;
       attachPaymentUrlToLatestConfirmed(payloadPaymentUrl);
-      if (isPaymentEvent && t !== "ConversationText") {
-        pushTextEntry("agent", "Payment link is ready. Tap Pay order to complete checkout.");
-      }
     }
 
     if (t.toLowerCase() === "history") return;
@@ -839,6 +882,7 @@ export default function Voice() {
     const token = getAccessToken();
     setTranscript([]);
     paymentUrlRef.current = null;
+    shownPayActionUrlsRef.current.clear();
     const plan = userStore.get()?.plan;
     connect(plan === "pro" && token ? token : null);
   }
@@ -1072,6 +1116,7 @@ export default function Voice() {
     clearTokens();
     userStore.set(null);
     paymentUrlRef.current = null;
+    shownPayActionUrlsRef.current.clear();
     setLocation("/");
   }
 
@@ -1501,7 +1546,6 @@ function Bubble({
   }
 
   if (entry.type === "confirmed") {
-    const paymentUrl = entry.paymentUrl;
     return (
       <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
         <VelaAvatar />
@@ -1516,15 +1560,24 @@ function Bubble({
           {entry.orderId && (
             <div className="text-xs text-muted-foreground mt-1 break-all">Reference: {entry.orderId}</div>
           )}
-          {paymentUrl && (
-            <button
-              type="button"
-              className="vg-btn-primary mt-4 text-sm"
-              onClick={() => onPayOrder?.(paymentUrl)}
-            >
-              Pay order
-            </button>
-          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "pay_action") {
+    return (
+      <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className="vg-card flex-1 p-4">
+          <div className="text-sm text-foreground mb-3">Payment link is ready.</div>
+          <button
+            type="button"
+            className="vg-btn-primary text-sm"
+            onClick={() => onPayOrder?.(entry.paymentUrl)}
+          >
+            Pay now
+          </button>
         </div>
       </div>
     );
