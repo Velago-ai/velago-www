@@ -187,12 +187,12 @@ export function listOrders(token: string, params: ListOrdersParams = {}): Promis
   return apiRequest("GET", `/orders${qs ? `?${qs}` : ""}`, null, token);
 }
 
-export interface ReorderLastResponse {
+export interface ReorderResponse {
   [key: string]: unknown;
 }
 
-export function reorderLastOrder(token: string): Promise<ReorderLastResponse> {
-  return apiPost("/orders/reorder-last", {}, token);
+export function reorderOrder(token: string, orderId: string): Promise<ReorderResponse> {
+  return apiPost("/orders/reorder", { order_id: orderId }, token);
 }
 
 export type ChatTranscriptLine = {
