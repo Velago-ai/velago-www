@@ -4,7 +4,7 @@ import { AppLayout } from "@/components/app-layout";
 import { type Category } from "@/lib/placeholder-data";
 import { Search, ChevronDown, ChevronRight, RotateCcw, Utensils, Plane, Package, Hotel, FileDown } from "lucide-react";
 import { getAccessToken } from "@/lib/auth";
-import { listOrders, reorderLastOrder, type OrderListItem, type OrdersPageResponse } from "@/lib/api-auth";
+import { listOrders, reorderOrder, type OrderListItem, type OrdersPageResponse } from "@/lib/api-auth";
 import { downloadOrderConfirmation, orderConfirmationLabel } from "@/lib/order-confirmation-pdf";
 import { savePendingReorderFlow } from "@/lib/reorder-flow";
 
@@ -21,6 +21,7 @@ type Filter = (typeof FILTERS)[number];
 
 interface UiOrder {
   id: string;
+  reorderOrderId?: string;
   category: Category;
   provider: string;
   service: string;
@@ -141,6 +142,13 @@ function firstString(values: unknown[], fallback: string): string {
   return fallback;
 }
 
+function firstOptionalString(values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 function formatDate(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "Unknown date";
   const d = new Date(value);
@@ -192,8 +200,11 @@ function toUiOrder(order: OrderListItem, index: number): UiOrder | null {
     details.push({ label: "Expires", value: formatDate(order.expires_at) });
   }
 
+  const reorderOrderId = firstOptionalString([order.id]);
+
   return {
     id: firstString([order.id, order.order_id, order.meshhub_order_id], `row-${index}`),
+    reorderOrderId,
     category,
     provider,
     service,
@@ -288,8 +299,12 @@ export default function Bookings() {
   const canPrev = ordersPage > 1;
   const canNext = ordersPage * PER_PAGE < ordersTotal;
 
-  const handleReorder = async () => {
+  const handleReorder = async (orderId?: string) => {
     if (reorderLoading) return;
+    if (!orderId) {
+      setReorderError("Could not reorder this booking: missing order id.");
+      return;
+    }
     const token = getAccessToken();
     if (!token) {
       setReorderError("Sign in to reorder bookings.");
@@ -299,11 +314,11 @@ export default function Bookings() {
     setReorderLoading(true);
     setReorderError(null);
     try {
-      const reorderPayload = await reorderLastOrder(token);
+      const reorderPayload = await reorderOrder(token, orderId);
       savePendingReorderFlow(reorderPayload);
       setLocation("/voice?reorder=last");
     } catch (error) {
-      setReorderError(error instanceof Error ? error.message : "Failed to reorder last booking.");
+      setReorderError(error instanceof Error ? error.message : "Failed to reorder booking.");
     } finally {
       setReorderLoading(false);
     }
@@ -454,11 +469,11 @@ export default function Bookings() {
                       <button
                         type="button"
                         className="hidden sm:inline-flex vg-chip vg-chip-info gap-1 hover:opacity-80 disabled:opacity-60"
-                        disabled={reorderLoading}
+                        disabled={reorderLoading || !o.reorderOrderId}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          void handleReorder();
+                          void handleReorder(o.reorderOrderId);
                         }}
                       >
                         <RotateCcw className="w-3 h-3" /> {reorderLoading ? "Reordering..." : "Reorder"}
@@ -506,11 +521,11 @@ export default function Bookings() {
                             <button
                               type="button"
                               className="vg-btn-ghost py-2 px-4 text-sm flex-1 disabled:opacity-60"
-                              disabled={reorderLoading}
+                              disabled={reorderLoading || !o.reorderOrderId}
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                void handleReorder();
+                                void handleReorder(o.reorderOrderId);
                               }}
                             >
                               <RotateCcw className="w-4 h-4" /> {reorderLoading ? "Reordering..." : "Reorder"}
