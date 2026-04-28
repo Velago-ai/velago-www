@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/app-layout";
 import { type Category } from "@/lib/placeholder-data";
 import { Search, ChevronDown, ChevronRight, RotateCcw, Utensils, Plane, Package, Hotel, FileDown } from "lucide-react";
 import { getAccessToken } from "@/lib/auth";
-import { listOrders, type OrderListItem, type OrdersPageResponse } from "@/lib/api-auth";
+import { listOrders, reorderLastOrder, type OrderListItem, type OrdersPageResponse } from "@/lib/api-auth";
 import { downloadOrderConfirmation, orderConfirmationLabel } from "@/lib/order-confirmation-pdf";
+import { savePendingReorderFlow } from "@/lib/reorder-flow";
 
 const CATEGORY_ICON: Record<Category, { Icon: typeof Utensils; bg: string; color: string }> = {
   food: { Icon: Utensils, bg: "bg-emerald-100", color: "text-emerald-600" },
@@ -205,6 +207,7 @@ function toUiOrder(order: OrderListItem, index: number): UiOrder | null {
 }
 
 export default function Bookings() {
+  const [, setLocation] = useLocation();
   const [filter, setFilter] = useState<Filter>("All");
   const [openActive, setOpenActive] = useState<string | null>(null);
   const [openPast, setOpenPast] = useState<string | null>(null);
@@ -216,6 +219,8 @@ export default function Bookings() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
+  const [reorderLoading, setReorderLoading] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
 
   useEffect(() => {
     setOrdersPage(1);
@@ -282,6 +287,27 @@ export default function Bookings() {
 
   const canPrev = ordersPage > 1;
   const canNext = ordersPage * PER_PAGE < ordersTotal;
+
+  const handleReorder = async () => {
+    if (reorderLoading) return;
+    const token = getAccessToken();
+    if (!token) {
+      setReorderError("Sign in to reorder bookings.");
+      return;
+    }
+
+    setReorderLoading(true);
+    setReorderError(null);
+    try {
+      const reorderPayload = await reorderLastOrder(token);
+      savePendingReorderFlow(reorderPayload);
+      setLocation("/voice?reorder=last");
+    } catch (error) {
+      setReorderError(error instanceof Error ? error.message : "Failed to reorder last booking.");
+    } finally {
+      setReorderLoading(false);
+    }
+  };
 
   return (
     <AppLayout>
@@ -404,6 +430,7 @@ export default function Bookings() {
 
         <section>
           <h2 className="font-display text-xl md:text-2xl font-bold mb-4">Past bookings</h2>
+          {reorderError && <p className="text-sm text-destructive mb-3 px-1">{reorderError}</p>}
           <div className="vg-card divide-y divide-border overflow-hidden">
             {!ordersLoading && !ordersError && pastOrders.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-10">No past bookings.</p>
@@ -424,8 +451,17 @@ export default function Bookings() {
                         </div>
                       </button>
                       <StatusChip status={o.status} />
-                      <button className="hidden sm:inline-flex vg-chip vg-chip-info gap-1 hover:opacity-80">
-                        <RotateCcw className="w-3 h-3" /> Reorder
+                      <button
+                        type="button"
+                        className="hidden sm:inline-flex vg-chip vg-chip-info gap-1 hover:opacity-80 disabled:opacity-60"
+                        disabled={reorderLoading}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void handleReorder();
+                        }}
+                      >
+                        <RotateCcw className="w-3 h-3" /> {reorderLoading ? "Reordering..." : "Reorder"}
                       </button>
                     </div>
                     {open && (
@@ -467,8 +503,17 @@ export default function Bookings() {
                             </button>
                           </div>
                           <div className="flex gap-2 mt-4 sm:hidden">
-                            <button className="vg-btn-ghost py-2 px-4 text-sm flex-1">
-                              <RotateCcw className="w-4 h-4" /> Reorder
+                            <button
+                              type="button"
+                              className="vg-btn-ghost py-2 px-4 text-sm flex-1 disabled:opacity-60"
+                              disabled={reorderLoading}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleReorder();
+                              }}
+                            >
+                              <RotateCcw className="w-4 h-4" /> {reorderLoading ? "Reordering..." : "Reorder"}
                             </button>
                           </div>
                         </div>

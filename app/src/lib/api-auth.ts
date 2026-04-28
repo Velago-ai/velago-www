@@ -187,6 +187,14 @@ export function listOrders(token: string, params: ListOrdersParams = {}): Promis
   return apiRequest("GET", `/orders${qs ? `?${qs}` : ""}`, null, token);
 }
 
+export interface ReorderLastResponse {
+  [key: string]: unknown;
+}
+
+export function reorderLastOrder(token: string): Promise<ReorderLastResponse> {
+  return apiPost("/orders/reorder-last", {}, token);
+}
+
 export type ChatTranscriptLine = {
   role: string;
   text: string;
