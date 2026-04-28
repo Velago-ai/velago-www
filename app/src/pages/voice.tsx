@@ -62,6 +62,15 @@ interface ConfirmedEntry {
   paymentUrl?: string;
 }
 
+interface OrderStatusEntry {
+  id: string;
+  type: "order_status";
+  orderId: string;
+  status: string;
+  message: string;
+  updatedAtEpochMs?: number;
+}
+
 interface SignupOfferEntry {
   id: string;
   type: "signup_offer";
@@ -69,7 +78,7 @@ interface SignupOfferEntry {
   signupPath: string;
 }
 
-type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | SignupOfferEntry;
+type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | OrderStatusEntry | SignupOfferEntry;
 
 interface PendingAutoMessage {
   text: string;
@@ -190,6 +199,20 @@ function extractPaymentUrlFromPayload(value: unknown, depth = 0): string | null 
 
 
 // ── Component ────────────────────────────────────────────────────────────────
+
+function titleCaseWords(value: string): string {
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function humanizeStatusValue(raw: string): string {
+  const normalized = raw.replace(/[_-]+/g, " ").trim();
+  if (!normalized) return "Unknown";
+  return titleCaseWords(normalized);
+}
 
 function resolveSignupPath(value: unknown): string {
   const fallback = "/auth?mode=register";
@@ -505,6 +528,37 @@ export default function Voice() {
     setTranscript((prev) => [...prev, entry]);
   }
 
+  function pushOrderStatusEntry(orderId: string, status: string, message: string, updatedAtEpochMs?: number) {
+    const normalizedOrderId = orderId.trim();
+    const normalizedStatus = status.trim();
+    const normalizedMessage = message.trim();
+    if (!normalizedOrderId || !normalizedStatus || !normalizedMessage) return;
+
+    setIsTyping(false);
+    setTranscript((prev) => {
+      const last = prev[prev.length - 1];
+      if (
+        last?.type === "order_status" &&
+        last.orderId === normalizedOrderId &&
+        last.status === normalizedStatus &&
+        last.updatedAtEpochMs === updatedAtEpochMs
+      ) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id: nextId(),
+          type: "order_status",
+          orderId: normalizedOrderId,
+          status: normalizedStatus,
+          message: normalizedMessage,
+          updatedAtEpochMs,
+        },
+      ];
+    });
+  }
+
   function pushTextEntry(role: "user" | "agent", content: string) {
     const text = content.trim();
     if (!text) return;
@@ -614,6 +668,25 @@ export default function Voice() {
         attachPaymentUrlToLatestConfirmed(paymentUrl);
       }
       pushTextEntry(role, content);
+      return;
+    }
+    if (t === "OrderStatusUpdated") {
+      const orderId = String(msg.order_id ?? msg.orderId ?? "");
+      const statusRaw = String(msg.status ?? "");
+      const status = humanizeStatusValue(statusRaw);
+      const fallbackMessage = statusRaw
+        ? `Your order status changed to ${status}.`
+        : "Your order status changed.";
+      const message = String(msg.message ?? fallbackMessage);
+      const updatedAtValue = msg.updated_at_epoch_ms ?? msg.updatedAtEpochMs;
+      const updatedAtParsed =
+        typeof updatedAtValue === "number"
+          ? updatedAtValue
+          : typeof updatedAtValue === "string" && updatedAtValue.trim()
+            ? Number(updatedAtValue)
+            : Number.NaN;
+
+      pushOrderStatusEntry(orderId, status, message, Number.isFinite(updatedAtParsed) ? updatedAtParsed : undefined);
       return;
     }
     if (t === "DemoSignupOffer") {
@@ -1452,6 +1525,24 @@ function Bubble({
               Pay order
             </button>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.type === "order_status") {
+    const statusKey = entry.status.toLowerCase();
+    const isPositive = statusKey === "paid" || statusKey === "confirmed" || statusKey === "completed";
+    return (
+      <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+        <VelaAvatar />
+        <div className="vg-card flex-1 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-semibold text-sm text-foreground">Order status updated</div>
+            <span className={`vg-chip ${isPositive ? "vg-chip-confirmed" : "vg-chip-info"}`}>{entry.status}</span>
+          </div>
+          <p className="text-sm text-foreground mt-2">{entry.message}</p>
+          <div className="text-xs text-muted-foreground mt-2 break-all">Reference: {entry.orderId}</div>
         </div>
       </div>
     );
