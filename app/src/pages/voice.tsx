@@ -1191,13 +1191,15 @@ export default function Voice() {
   const rightSlot = (
     <button
       onClick={() => {
-        if (!hasAccessToken) return;
+        if (!hasAccessToken) {
+          setLocation("/auth");
+          return;
+        }
         setLocation("/settings");
       }}
-      disabled={!hasAccessToken}
-      className="w-9 h-9 rounded-full bg-secondary border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="w-9 h-9 rounded-full bg-secondary border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
       aria-label="Account"
-      title={hasAccessToken ? (profile ? (profile.email ?? "Account") : "Account") : "Available after sign in"}
+      title={hasAccessToken ? (profile ? (profile.email ?? "Account") : "Account") : "Sign in"}
     >
       <User2 className="w-4 h-4" />
     </button>
