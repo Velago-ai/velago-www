@@ -16,8 +16,9 @@ const CAPTURE_RATE = 48000;
 const PLAYBACK_RATE = 24000;
 const INPUT_GAIN = 1.0;
 const ALLOW_BARGE_IN = false;
-const MIN_PLAYBACK_SAMPLES = 4800;
-const FLUSH_DELAY_MS = 120;
+const MIN_PLAYBACK_SAMPLES = 2400;
+const FLUSH_DELAY_MS = 60;
+const AGENT_TEXT_AUDIO_SYNC_TIMEOUT_MS = 350;
 const LOGO_FILTER =
   "brightness(0) saturate(100%) invert(28%) sepia(98%) saturate(3500%) hue-rotate(228deg) brightness(98%) contrast(101%)";
 
@@ -342,6 +343,9 @@ export default function Voice() {
   const pendingContinueSessionRef = useRef<string | null>(null);
   const pendingAutoMessageRef = useRef<PendingAutoMessage | null>(null);
   const pendingUserEchoesRef = useRef<Map<string, number>>(new Map());
+  const pendingAgentTextsRef = useRef<string[]>([]);
+  const pendingAgentTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const waitForFirstAgentAudioRef = useRef(false);
   const autoReorderStartedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
@@ -369,6 +373,15 @@ export default function Voice() {
     if (!ttl) return false;
     pendingUserEchoesRef.current.delete(normalized);
     return ttl >= Date.now();
+  }
+
+  function resetAgentTextSyncState() {
+    if (pendingAgentTextTimerRef.current) {
+      clearTimeout(pendingAgentTextTimerRef.current);
+      pendingAgentTextTimerRef.current = null;
+    }
+    pendingAgentTextsRef.current = [];
+    waitForFirstAgentAudioRef.current = false;
   }
 
   // ── Auth load (best-effort) ──────────────────────────────────────────────
@@ -493,6 +506,7 @@ export default function Voice() {
     void scheduleBuffer(merged);
   }
   function handleAudio(ab: ArrayBuffer) {
+    if (waitForFirstAgentAudioRef.current) flushPendingAgentTexts();
     const samples = ab.byteLength / 2;
     const durationMs = (samples / PLAYBACK_RATE) * 1000;
     agentSpeakingUntilRef.current = Math.max(agentSpeakingUntilRef.current, Date.now() + durationMs + 150);
@@ -508,6 +522,7 @@ export default function Voice() {
     pendingSamplesRef.current = 0;
     playbackCursorRef.current = 0;
     agentSpeakingUntilRef.current = 0;
+    resetAgentTextSyncState();
     if (playCtxRef.current) { playCtxRef.current.close(); playCtxRef.current = null; }
   }
 
@@ -519,6 +534,7 @@ export default function Voice() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
 
     markPendingUserEcho(text);
+    waitForFirstAgentAudioRef.current = true;
     wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
     if (pending.echoUserBubble) pushTextEntry("user", text);
     pendingAutoMessageRef.current = null;
@@ -623,6 +639,35 @@ export default function Voice() {
     });
   }
 
+  function flushPendingAgentTexts() {
+    if (pendingAgentTextTimerRef.current) {
+      clearTimeout(pendingAgentTextTimerRef.current);
+      pendingAgentTextTimerRef.current = null;
+    }
+    const pending = pendingAgentTextsRef.current;
+    if (pending.length === 0) {
+      waitForFirstAgentAudioRef.current = false;
+      return;
+    }
+    pendingAgentTextsRef.current = [];
+    waitForFirstAgentAudioRef.current = false;
+    for (const text of pending) pushTextEntry("agent", text);
+  }
+
+  function enqueueAgentTextWithAudioSync(content: string) {
+    const text = content.trim();
+    if (!text) return;
+    if (!waitForFirstAgentAudioRef.current) {
+      pushTextEntry("agent", text);
+      return;
+    }
+    pendingAgentTextsRef.current.push(text);
+    if (pendingAgentTextTimerRef.current) clearTimeout(pendingAgentTextTimerRef.current);
+    pendingAgentTextTimerRef.current = setTimeout(() => {
+      flushPendingAgentTexts();
+    }, AGENT_TEXT_AUDIO_SYNC_TIMEOUT_MS);
+  }
+
   function attachPaymentUrlToLatestConfirmed(paymentUrl: string) {
     setTranscript((prev) => {
       for (let i = prev.length - 1; i >= 0; i--) {
@@ -710,7 +755,11 @@ export default function Voice() {
         paymentUrlRef.current = paymentUrl;
         attachPaymentUrlToLatestConfirmed(paymentUrl);
       }
-      pushTextEntry(role, content);
+      if (role === "agent") {
+        enqueueAgentTextWithAudioSync(content);
+      } else {
+        pushTextEntry(role, content);
+      }
       return;
     }
     if (t === "OrderStatusUpdated") {
@@ -750,6 +799,7 @@ export default function Voice() {
       return;
     }
     if (t === "AgentAudioDone") {
+      flushPendingAgentTexts();
       agentSpeakingUntilRef.current = Math.max(agentSpeakingUntilRef.current, Date.now() + 250);
       setIsTyping(false);
       return;
@@ -881,6 +931,7 @@ export default function Voice() {
   function startSession() {
     const token = getAccessToken();
     setTranscript([]);
+    resetAgentTextSyncState();
     paymentUrlRef.current = null;
     shownPayActionUrlsRef.current.clear();
     const plan = userStore.get()?.plan;
@@ -1040,6 +1091,7 @@ export default function Voice() {
       return;
     }
     markPendingUserEcho(text);
+    waitForFirstAgentAudioRef.current = true;
     wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
     pushEntry({ id: nextId(), type: "text", role: "user", content: text });
     setTextInput("");
@@ -1058,6 +1110,7 @@ export default function Voice() {
     setIsTyping(true);
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      waitForFirstAgentAudioRef.current = true;
       wsRef.current.send(JSON.stringify({ type: "TextMessage", text }));
       if (shouldAutoStartMic) autoStartMicFromTyping();
       return;
