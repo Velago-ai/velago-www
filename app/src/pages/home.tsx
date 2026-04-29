@@ -53,8 +53,11 @@ export default function Home() {
     }
   }, [transcript, isListening]);
 
-  const handleQuery = (text: string) => {
-    const lowerText = text.toLowerCase();
+  const handleQuery = () => {
+    setTranscript("");
+    setInputText("");
+    setLocation("/voice");
+    return;
     
     // Simple intent detection
     if (/(pizza|food|dinner|delivery|restaurant|eat)/i.test(lowerText)) {
