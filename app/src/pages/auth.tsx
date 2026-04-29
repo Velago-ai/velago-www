@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Apple, Chrome } from "lucide-react";
+import { Apple } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { register, confirmEmail, login, requestResetCode, confirmReset } from "@/lib/api-auth";
@@ -12,6 +12,29 @@ const LOGO_FILTER =
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
 const FEDERATED_START_PATH =
   (import.meta.env.VITE_FEDERATED_AUTH_START_PATH as string | undefined) ?? "/auth/federated/start";
+
+function GoogleGIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5">
+      <path
+        fill="#EA4335"
+        d="M12.26 10.29v3.84h5.45c-.24 1.24-.95 2.29-2.02 2.99l3.27 2.53c1.9-1.75 3-4.33 3-7.39 0-.71-.06-1.4-.18-2.06h-9.52z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 22c2.7 0 4.96-.89 6.62-2.4l-3.27-2.53c-.9.6-2.06.96-3.35.96-2.58 0-4.76-1.74-5.54-4.08H3.08v2.57A10 10 0 0 0 12 22z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M6.46 13.95a6 6 0 0 1 0-3.9V7.48H3.08a10 10 0 0 0 0 9.04l3.38-2.57z"
+      />
+      <path
+        fill="#4285F4"
+        d="M12 5.97c1.47 0 2.8.5 3.84 1.49l2.88-2.88C16.95 2.94 14.7 2 12 2a10 10 0 0 0-8.92 5.48l3.38 2.57c.78-2.34 2.96-4.08 5.54-4.08z"
+      />
+    </svg>
+  );
+}
 
 // Min 8 chars, at least 1 letter, at least 1 digit, no spaces/quotes/commas
 const PASSWORD_RE = /^(?=.*[a-zA-Z])(?=.*\d)[^\s'",]{8,}$/;
@@ -241,22 +264,21 @@ export default function Auth() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 rounded-full"
+                  className="h-11 rounded-md border border-[#dadce0] bg-white text-[#3c4043] hover:bg-[#f8f9fa] hover:text-[#3c4043]"
                   disabled={loading}
                   onClick={() => startFederatedSignIn("google")}
                 >
-                  <Chrome className="w-4 h-4 mr-2" />
-                  Continue with Google
+                  <GoogleGIcon />
+                  <span className="ml-2">Sign in with Google</span>
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
-                  className="h-11 rounded-full"
+                  className="h-11 rounded-md bg-black text-white hover:bg-black/90 border border-black"
                   disabled={loading}
                   onClick={() => startFederatedSignIn("apple")}
                 >
                   <Apple className="w-4 h-4 mr-2" />
-                  Continue with Apple
+                  Sign in with Apple
                 </Button>
               </form>
               <p className="text-center text-sm text-muted-foreground mt-4">
