@@ -53,7 +53,8 @@ export default function Home() {
     }
   }, [transcript, isListening]);
 
-  const handleQuery = () => {
+  const handleQuery = (text: string) => {
+    const lowerText = text.toLowerCase();
     setTranscript("");
     setInputText("");
     setLocation("/voice");
@@ -89,7 +90,7 @@ export default function Home() {
       <header className="w-full py-6 px-6 md:px-12 flex justify-between items-center max-w-7xl mx-auto">
         <img src={velagoLogo} alt="VelaGo Logo" className="h-14 md:h-20 object-contain" style={{ filter: LOGO_BLUE_FILTER }} />
         <Button
-          className="rounded-full px-6 h-10 bg-primary-gradient text-white border-0"
+          className="hidden rounded-full px-6 h-10 bg-primary-gradient text-white border-0"
           onClick={() => setLocation("/auth")}
         >
           Sign in
