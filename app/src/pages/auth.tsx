@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
+import { Apple, Chrome } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { register, confirmEmail, login, requestResetCode, confirmReset } from "@/lib/api-auth";
@@ -8,6 +9,9 @@ import velagoLogo from "@assets/velago_logo_nobg.svg";
 
 const LOGO_FILTER =
   "brightness(0) saturate(100%) invert(18%) sepia(90%) saturate(2500%) hue-rotate(220deg) brightness(95%) contrast(95%)";
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
+const FEDERATED_START_PATH =
+  (import.meta.env.VITE_FEDERATED_AUTH_START_PATH as string | undefined) ?? "/auth/federated/start";
 
 // Min 8 chars, at least 1 letter, at least 1 digit, no spaces/quotes/commas
 const PASSWORD_RE = /^(?=.*[a-zA-Z])(?=.*\d)[^\s'",]{8,}$/;
@@ -29,8 +33,18 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated()) { setLocation("/voice"); return; }
     const params = new URLSearchParams(window.location.search);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken) {
+      setTokens(accessToken, refreshToken);
+      window.history.replaceState(null, "", "/auth");
+      setLocation("/voice");
+      return;
+    }
+    const authError = params.get("auth_error") ?? params.get("error_description") ?? params.get("error");
+    if (authError) setError(authError);
+    if (isAuthenticated()) { setLocation("/voice"); return; }
     const resetEmail = params.get("reset");
     if (resetEmail) {
       setEmail(resetEmail);
@@ -45,6 +59,16 @@ export default function Auth() {
     setMode(m);
     setError(null);
     setSuccess(null);
+  }
+
+  function startFederatedSignIn(provider: "google" | "apple") {
+    setError(null);
+    setSuccess(null);
+    const returnTo = `${window.location.origin}/auth`;
+    const url = new URL(`${API_BASE}${FEDERATED_START_PATH}`);
+    url.searchParams.set("provider", provider);
+    url.searchParams.set("return_to", returnTo);
+    window.location.href = url.toString();
   }
 
   function validatePassword(): string | null {
@@ -208,6 +232,31 @@ export default function Auth() {
                   className="h-11 mt-1 rounded-full bg-primary-gradient text-white border-0"
                 >
                   {loading ? "Signing in…" : "Sign in"}
+                </Button>
+                <div className="flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs text-muted-foreground">or</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-full"
+                  disabled={loading}
+                  onClick={() => startFederatedSignIn("google")}
+                >
+                  <Chrome className="w-4 h-4 mr-2" />
+                  Continue with Google
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-full"
+                  disabled={loading}
+                  onClick={() => startFederatedSignIn("apple")}
+                >
+                  <Apple className="w-4 h-4 mr-2" />
+                  Continue with Apple
                 </Button>
               </form>
               <p className="text-center text-sm text-muted-foreground mt-4">
