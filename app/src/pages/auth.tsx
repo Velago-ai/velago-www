@@ -68,18 +68,12 @@ export default function Auth() {
     const authError = params.get("auth_error") ?? params.get("error_description") ?? params.get("error");
     if (authError) setError(authError);
     if (isAuthenticated()) { setLocation("/voice"); return; }
-    const resetEmail = params.get("reset");
-    if (resetEmail) {
-      setEmail(resetEmail);
-      setMode("reset-code");
-      return;
-    }
-    const modeParam = params.get("mode");
-    if (modeParam === "register") setMode("register");
+    setMode("login");
   }, []);
 
   function switchMode(m: Mode) {
-    setMode(m);
+    if (m !== "login") return;
+    setMode("login");
     setError(null);
     setSuccess(null);
   }
