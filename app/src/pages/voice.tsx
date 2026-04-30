@@ -12,6 +12,9 @@ import velagoLogo from "@assets/velago_logo_nobg.svg";
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const WS_URL = "wss://ws.velago.ai/ws";
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
+const FEDERATED_START_PATH = "/auth/federated/start";
+const FEDERATED_RETURN_TO_OVERRIDE = import.meta.env.VITE_FEDERATED_RETURN_TO as string | undefined;
 const CAPTURE_RATE = 48000;
 const PLAYBACK_RATE = 24000;
 const INPUT_GAIN = 1.0;
@@ -1158,6 +1161,20 @@ export default function Voice() {
     pushTextEntry("agent", "Please allow pop-ups to open payment, or copy the payment link from support.");
   }
 
+  function resolveFederatedReturnTo(): string {
+    const fromEnv = FEDERATED_RETURN_TO_OVERRIDE?.trim();
+    if (fromEnv) return fromEnv;
+    return `${window.location.origin}/auth`;
+  }
+
+  function startFederatedSignIn(provider: "google" | "apple") {
+    const returnTo = resolveFederatedReturnTo();
+    const url = new URL(`${API_BASE}${FEDERATED_START_PATH}`);
+    url.searchParams.set("provider", provider);
+    url.searchParams.set("return_to", returnTo);
+    window.location.href = url.toString();
+  }
+
   function signup(path: string) {
     setLocation(path);
   }
@@ -1255,6 +1272,7 @@ export default function Voice() {
                 onSelect={selectQuote}
                 onPayOrder={payOrder}
                 onSignup={signup}
+                onFederatedSignIn={startFederatedSignIn}
                 onEditField={editReviewField}
               />
             ))}
@@ -1362,6 +1380,7 @@ function Bubble({
   onSelect,
   onPayOrder,
   onSignup,
+  onFederatedSignIn,
   onEditField,
 }: {
   entry: TranscriptEntry;
@@ -1369,6 +1388,7 @@ function Bubble({
   onSelect?: (provider: string, price: string, currency: string) => void;
   onPayOrder?: (url: string) => void;
   onSignup?: (path: string) => void;
+  onFederatedSignIn?: (provider: "google" | "apple") => void;
   onEditField?: (entry: ReviewEntry, row: ReviewEntry["rows"][number], value: string) => void;
 }) {
   const delay = `${Math.min(index, 6) * 50}ms`;
@@ -1586,7 +1606,23 @@ function Bubble({
         <VelaAvatar />
         <div className="vg-card flex-1 p-4">
           <p className="text-sm text-foreground">{entry.prompt}</p>
-          <div className="mt-3 flex justify-end">
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="h-10 rounded-md border border-[#dadce0] bg-white text-[#3c4043] text-sm font-semibold hover:bg-[#f8f9fa]"
+              onClick={() => onFederatedSignIn?.("google")}
+            >
+              Sign in with Google
+            </button>
+            <button
+              type="button"
+              className="h-10 rounded-md bg-black text-white text-sm font-semibold hover:bg-black/90 border border-black"
+              onClick={() => onFederatedSignIn?.("apple")}
+            >
+              Sign in with Apple
+            </button>
+          </div>
+          <div className="hidden mt-3 flex justify-end">
             <button
               type="button"
               className="vg-btn-primary py-2 px-5 text-sm"
