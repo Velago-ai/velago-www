@@ -276,27 +276,29 @@ export default function Settings() {
             }}
           />
           <EditableRow label="Phone" value={profile?.phone ?? profile?.phone_number ?? ""} onSave={(v) => patchField({ phone: v })} />
-          <Row
-            label="Reset password"
-            value="A confirmation code will be sent to your email"
-            action={
-              <button
-                className="text-sm font-semibold text-primary hover:underline"
-                onClick={async () => {
-                  const email = profile?.email;
-                  if (!email) return;
-                  try {
-                    await requestResetCode(email);
-                    clearTokens();
-                    userStore.set(null);
-                    setLocation(`/auth?reset=${encodeURIComponent(email)}`);
-                  } catch { /* ignore */ }
-                }}
-              >
-                Reset
-              </button>
-            }
-          />
+          <div className="hidden">
+            <Row
+              label="Reset password"
+              value="A confirmation code will be sent to your email"
+              action={
+                <button
+                  className="text-sm font-semibold text-primary hover:underline"
+                  onClick={async () => {
+                    const email = profile?.email;
+                    if (!email) return;
+                    try {
+                      await requestResetCode(email);
+                      clearTokens();
+                      userStore.set(null);
+                      setLocation(`/auth?reset=${encodeURIComponent(email)}`);
+                    } catch { /* ignore */ }
+                  }}
+                >
+                  Reset
+                </button>
+              }
+            />
+          </div>
         </Section>
 
         <Section title="Default address">
