@@ -244,6 +244,7 @@ export default function Auth() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   autoComplete="email"
+                  className="hidden"
                 />
                 <Input
                   type="password"
@@ -252,17 +253,18 @@ export default function Auth() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
+                  className="hidden"
                 />
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 {success && <p className="text-sm text-emerald-600">{success}</p>}
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="h-11 mt-1 rounded-full bg-primary-gradient text-white border-0"
+                  className="hidden h-11 mt-1 rounded-full bg-primary-gradient text-white border-0"
                 >
                   {loading ? "Signing in…" : "Sign in"}
                 </Button>
-                <div className="flex items-center gap-3 py-1">
+                <div className="hidden items-center gap-3 py-1">
                   <div className="h-px flex-1 bg-border" />
                   <span className="text-xs text-muted-foreground">or</span>
                   <div className="h-px flex-1 bg-border" />
@@ -287,7 +289,7 @@ export default function Auth() {
                   Sign in with Apple
                 </Button>
               </form>
-              <p className="text-center text-sm text-muted-foreground mt-4">
+              <p className="hidden text-center text-sm text-muted-foreground mt-4">
                 <button
                   type="button"
                   onClick={() => switchMode("reset-email")}
@@ -296,7 +298,7 @@ export default function Auth() {
                   Forgot password?
                 </button>
               </p>
-              <p className="text-center text-sm text-muted-foreground mt-2">
+              <p className="hidden text-center text-sm text-muted-foreground mt-2">
                 No account?{" "}
                 <button
                   type="button"
