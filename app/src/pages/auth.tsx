@@ -11,8 +11,7 @@ const LOGO_FILTER =
   "brightness(0) saturate(100%) invert(18%) sepia(90%) saturate(2500%) hue-rotate(220deg) brightness(95%) contrast(95%)";
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
 const FEDERATED_START_PATH = "/auth/federated/start";
-const FEDERATED_RETURN_TO_PROD = "https://app.velago.ai/auth";
-const FEDERATED_RETURN_TO_LOCAL = "http://localhost:3000/auth";
+const FEDERATED_RETURN_TO_OVERRIDE = import.meta.env.VITE_FEDERATED_RETURN_TO as string | undefined;
 
 function GoogleGIcon() {
   return (
@@ -85,21 +84,16 @@ export default function Auth() {
     setSuccess(null);
   }
 
-  function resolveFederatedReturnTo(): string | null {
-    const hostname = window.location.hostname.toLowerCase();
-    if (hostname === "app.velago.ai") return FEDERATED_RETURN_TO_PROD;
-    if (hostname === "localhost" || hostname === "127.0.0.1") return FEDERATED_RETURN_TO_LOCAL;
-    return null;
+  function resolveFederatedReturnTo(): string {
+    const fromEnv = FEDERATED_RETURN_TO_OVERRIDE?.trim();
+    if (fromEnv) return fromEnv;
+    return `${window.location.origin}/auth`;
   }
 
   function startFederatedSignIn(provider: "google" | "apple") {
     setError(null);
     setSuccess(null);
     const returnTo = resolveFederatedReturnTo();
-    if (!returnTo) {
-      setError("Federated sign-in is available only on app.velago.ai or localhost:3000.");
-      return;
-    }
     const url = new URL(`${API_BASE}${FEDERATED_START_PATH}`);
     url.searchParams.set("provider", provider);
     url.searchParams.set("return_to", returnTo);
