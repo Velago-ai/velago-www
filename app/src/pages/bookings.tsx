@@ -390,6 +390,18 @@ export default function Bookings() {
                         </div>
                       </button>
                       <StatusChip status={o.status} />
+                      <button
+                        type="button"
+                        className="hidden sm:inline-flex vg-chip vg-chip-info gap-1 hover:opacity-80 disabled:opacity-60"
+                        disabled={reorderLoading || !o.reorderOrderId}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          void handleReorder(o.reorderOrderId);
+                        }}
+                      >
+                        <RotateCcw className="w-3 h-3" /> {reorderLoading ? "Reordering..." : "Reorder"}
+                      </button>
                       {open ? (
                         <ChevronDown className="w-4 h-4 text-muted-foreground" />
                       ) : (
@@ -432,6 +444,20 @@ export default function Bookings() {
                               className="vg-btn-primary py-2 px-4 text-sm w-full sm:w-auto"
                             >
                               <FileDown className="w-4 h-4" /> Download {orderConfirmationLabel(o.category)}
+                            </button>
+                          </div>
+                          <div className="flex gap-2 mt-4 sm:hidden">
+                            <button
+                              type="button"
+                              className="vg-btn-ghost py-2 px-4 text-sm flex-1 disabled:opacity-60"
+                              disabled={reorderLoading || !o.reorderOrderId}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleReorder(o.reorderOrderId);
+                              }}
+                            >
+                              <RotateCcw className="w-4 h-4" /> {reorderLoading ? "Reordering..." : "Reorder"}
                             </button>
                           </div>
                         </div>
