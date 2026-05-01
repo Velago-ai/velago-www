@@ -54,6 +54,7 @@ interface QuoteEntry {
   id: string;
   type: "quote";
   quoteKind: "flight" | "parcel";
+  serviceId?: string;
   provider: string;
   price: string;
   currency: string;
@@ -202,8 +203,87 @@ function normalizeCountryLabel(value: unknown): string | undefined {
 function normalizeIsoDate(value: unknown): string | undefined {
   const raw = String(value ?? "").trim();
   if (!raw) return undefined;
-  const m = raw.match(/\b(\d{4}-\d{2}-\d{2})\b/);
-  if (m) return m[1];
+  const iso = raw.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const dmy = raw.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b/);
+  if (dmy) {
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    const yearRaw = dmy[3];
+    if (!yearRaw) return undefined;
+    const parsed = Number(yearRaw);
+    const year = yearRaw.length === 2 ? 2000 + parsed : parsed;
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+    }
+  }
+
+  const monthMap: Record<string, number> = {
+    january: 1, jan: 1,
+    february: 2, feb: 2,
+    march: 3, mar: 3,
+    april: 4, apr: 4,
+    may: 5,
+    june: 6, jun: 6,
+    july: 7, jul: 7,
+    august: 8, aug: 8,
+    september: 9, sep: 9, sept: 9,
+    october: 10, oct: 10,
+    november: 11, nov: 11,
+    december: 12, dec: 12,
+  };
+  const ordinalWordMap: Record<string, number> = {
+    first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10,
+    eleventh: 11, twelfth: 12, thirteenth: 13, fourteenth: 14, fifteenth: 15, sixteenth: 16, seventeenth: 17,
+    eighteenth: 18, nineteenth: 19, twentieth: 20, "twenty first": 21, "twenty-first": 21, "twenty second": 22,
+    "twenty-second": 22, "twenty third": 23, "twenty-third": 23, "twenty fourth": 24, "twenty-fourth": 24,
+    "twenty fifth": 25, "twenty-fifth": 25, "twenty sixth": 26, "twenty-sixth": 26, "twenty seventh": 27,
+    "twenty-seventh": 27, "twenty eighth": 28, "twenty-eighth": 28, "twenty ninth": 29, "twenty-ninth": 29,
+    thirtieth: 30, "thirty first": 31, "thirty-first": 31,
+  };
+
+  const normalized = raw.toLowerCase().replace(/,/g, " ").replace(/\s+/g, " ").trim();
+
+  const dayMonthWord = normalized.match(
+    /\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?([a-z]{3,9})(?:\s+(\d{4}))?\b/
+  );
+  if (dayMonthWord) {
+    const day = Number(dayMonthWord[1]);
+    const month = monthMap[dayMonthWord[2]];
+    if (!dayMonthWord[3]) return undefined;
+    const year = Number(dayMonthWord[3]);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+    }
+  }
+
+  const monthWordDay = normalized.match(
+    /\b([a-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+(\d{4}))?\b/
+  );
+  if (monthWordDay) {
+    const month = monthMap[monthWordDay[1]];
+    const day = Number(monthWordDay[2]);
+    if (!monthWordDay[3]) return undefined;
+    const year = Number(monthWordDay[3]);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+    }
+  }
+
+  const ordinalMonthWord = normalized.match(
+    /\b([a-z-]+(?:\s+[a-z-]+)?)\s+of\s+([a-z]{3,9})(?:\s+(\d{4}))?\b/
+  );
+  if (ordinalMonthWord) {
+    const day = ordinalWordMap[ordinalMonthWord[1]];
+    const month = monthMap[ordinalMonthWord[2]];
+    if (!ordinalMonthWord[3]) return undefined;
+    const year = Number(ordinalMonthWord[3]);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+    }
+  }
+
   return undefined;
 }
 
@@ -216,10 +296,20 @@ function resolveFlightDates(
     ext.departure_date,
     ext.depart_date,
     ext.outbound_date,
+    ext.start_date,
+    ext.date_from,
+    ext.from_date,
+    ext.travel_date,
+    ext.departure,
     ext.departureDate,
     offer.departure_date,
     offer.depart_date,
     offer.outbound_date,
+    offer.start_date,
+    offer.date_from,
+    offer.from_date,
+    offer.travel_date,
+    offer.departure,
     offer.departureDate,
   ];
   const returnCandidates = [
@@ -227,27 +317,24 @@ function resolveFlightDates(
     ext.returnDate,
     ext.inbound_date,
     ext.arrival_date,
+    ext.end_date,
+    ext.date_to,
+    ext.to_date,
+    ext.return,
+    ext.arrival,
     offer.return_date,
     offer.returnDate,
     offer.inbound_date,
     offer.arrival_date,
+    offer.end_date,
+    offer.date_to,
+    offer.to_date,
+    offer.return,
+    offer.arrival,
   ];
 
   let departureDate = departureCandidates.map(normalizeIsoDate).find(Boolean);
   let returnDate = returnCandidates.map(normalizeIsoDate).find(Boolean);
-
-  if (!departureDate || !returnDate) {
-    const blob = [
-      String((offer.details as Record<string, unknown> | undefined)?.query ?? ""),
-      String(offer.name ?? ""),
-      String(offer.summary ?? ""),
-      String(offer.description ?? ""),
-      flightInfoRaw,
-    ].join(" ");
-    const allDates = blob.match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? [];
-    if (!departureDate && allDates[0]) departureDate = allDates[0];
-    if (!returnDate && allDates[1]) returnDate = allDates[1];
-  }
 
   return { departureDate, returnDate };
 }
@@ -1335,6 +1422,7 @@ export default function Voice() {
         id: nextId(),
         type: "quote",
         quoteKind: "parcel",
+        serviceId: offer.service_id != null ? String(offer.service_id) : undefined,
         provider: String(offer.provider ?? ""),
         price: offer.price != null ? Number(offer.price).toFixed(2) : "—",
         currency: String(offer.currency ?? "EUR"),
@@ -1379,6 +1467,7 @@ export default function Voice() {
       id: nextId(),
       type: "quote",
       quoteKind: "flight",
+      serviceId: offer.service_id != null ? String(offer.service_id) : undefined,
       provider: String(offer.provider ?? ""),
       price: offer.price != null ? Number(offer.price).toFixed(2) : "—",
       currency: String(offer.currency ?? "EUR"),
@@ -1598,9 +1687,23 @@ export default function Voice() {
     }, 10000);
   }
 
-  function selectQuote(provider: string, price: string, currency: string) {
+  function selectQuote(quote: QuoteEntry) {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
-    const text = `Yes, ${provider} for ${price} ${currency}`;
+    const pricePart = `${quote.price} ${quote.currency}`;
+    const servicePart = quote.serviceId ? `, service ${quote.serviceId}` : "";
+    let text = `Yes, ${quote.provider} for ${pricePart}${servicePart}`;
+    if (quote.quoteKind === "flight") {
+      const depart = quote.departureDate ?? "unknown";
+      const ret = quote.returnDate ?? "unknown";
+      text = `Yes, ${quote.provider}, route ${quote.route}, departure date ${depart}, return date ${ret}, for ${pricePart}${servicePart}`;
+    } else if (quote.quoteKind === "parcel") {
+      const fromTo =
+        quote.originLabel && quote.destinationLabel
+          ? `from ${quote.originLabel} to ${quote.destinationLabel}`
+          : quote.route;
+      const weight = quote.weightKg ? `, weight ${quote.weightKg}` : "";
+      text = `Yes, ${quote.provider}, ${fromTo}${weight}, for ${pricePart}${servicePart}`;
+    }
     markPendingUserEcho(text);
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
     pushEntry({ id: nextId(), type: "text", role: "user", content: text });
@@ -1857,7 +1960,7 @@ function Bubble({
 }: {
   entry: TranscriptEntry;
   index: number;
-  onSelect?: (provider: string, price: string, currency: string) => void;
+  onSelect?: (quote: QuoteEntry) => void;
   onPayOrder?: (url: string) => void;
   onSignup?: (path: string) => void;
   onFederatedSignIn?: (provider: "google" | "apple") => void;
@@ -2063,7 +2166,7 @@ function Bubble({
             {entry.deliveryType && <div className="text-xs text-foreground mt-1">Service: {entry.deliveryType}</div>}
             {entry.weightKg && <div className="text-xs text-foreground mt-0.5">Weight: {entry.weightKg}</div>}
             <div className="mt-3 flex justify-end">
-              <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry.provider, entry.price, entry.currency); }}>Select</button>
+              <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry); }}>Select</button>
             </div>
           </div>
         </div>
@@ -2090,7 +2193,7 @@ function Bubble({
           )}
           {entry.fareIncludes && <div className="text-xs text-muted-foreground mt-0.5">{entry.fareIncludes}</div>}
           <div className="mt-3 flex justify-end">
-            <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry.provider, entry.price, entry.currency); }}>Select</button>
+            <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry); }}>Select</button>
           </div>
         </div>
       </div>
