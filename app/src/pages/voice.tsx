@@ -1609,14 +1609,14 @@ function Bubble({
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               type="button"
-              className="h-10 rounded-md border border-[#dadce0] bg-white text-[#3c4043] text-sm font-semibold hover:bg-[#f8f9fa]"
+              className="h-10 rounded-md border border-[#dadce0] bg-white text-[#3c4043] text-sm font-semibold transition-colors duration-150 hover:bg-[#f8f9fa] active:bg-[#e8eaed] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               onClick={() => onFederatedSignIn?.("google")}
             >
               Sign in with Google
             </button>
             <button
               type="button"
-              className="h-10 rounded-md bg-black text-white text-sm font-semibold hover:bg-black/90 border border-black"
+              className="h-10 rounded-md bg-black text-white text-sm font-semibold border border-black transition-colors duration-150 hover:bg-black/90 active:bg-[#2d2d2d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               onClick={() => onFederatedSignIn?.("apple")}
             >
               Sign in with Apple
