@@ -18,6 +18,8 @@ const FEDERATED_RETURN_TO_OVERRIDE = import.meta.env.VITE_FEDERATED_RETURN_TO as
 const LANDING_START_MESSAGE_KEY = "velago_landing_start_message_v1";
 const DEMO_CHAT_SNAPSHOT_KEY = "velago_demo_chat_snapshot_v1";
 const POST_AUTH_RETURN_KEY = "velago_post_auth_return";
+const AUTO_CONTINUE_AFTER_AUTH_KEY = "velago_auto_continue_after_auth_v1";
+const AUTO_CONTINUE_AFTER_AUTH_TEXT = "Let's continue with a booking.";
 const DEMO_CHAT_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
 const CAPTURE_RATE = 48000;
 const PLAYBACK_RATE = 24000;
@@ -427,6 +429,7 @@ export default function Voice() {
     try {
       sessionStorage.setItem(DEMO_CHAT_SNAPSHOT_KEY, JSON.stringify(snapshot));
       sessionStorage.setItem(POST_AUTH_RETURN_KEY, "/voice");
+      sessionStorage.setItem(AUTO_CONTINUE_AFTER_AUTH_KEY, "1");
     } catch {
       // Ignore storage errors in private mode / quota limits
     }
@@ -571,6 +574,50 @@ export default function Voice() {
         pendingAutoMessageRef.current = null;
         setIsTyping(false);
         pushTextEntry("agent", "Could not start reorder chat automatically. Tap the mic and try again.");
+        return;
+      }
+      setTimeout(poll, 150);
+    };
+    setTimeout(poll, 150);
+  }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) return;
+    let shouldContinue = false;
+    try {
+      shouldContinue = sessionStorage.getItem(AUTO_CONTINUE_AFTER_AUTH_KEY) === "1";
+      if (shouldContinue) sessionStorage.removeItem(AUTO_CONTINUE_AFTER_AUTH_KEY);
+    } catch {
+      shouldContinue = false;
+    }
+    if (!shouldContinue) return;
+
+    const text = AUTO_CONTINUE_AFTER_AUTH_TEXT;
+    markPendingUserEcho(text);
+    pushTextEntry("user", text);
+    setIsTyping(true);
+    pendingAutoMessageRef.current = {
+      text,
+      echoUserBubble: false,
+    };
+
+    if (sendPendingAutoMessage()) return;
+
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+      connect(token);
+      return;
+    }
+
+    if (wsRef.current.readyState === WebSocket.CONNECTING) return;
+
+    const startedAt = Date.now();
+    const poll = () => {
+      if (sendPendingAutoMessage()) return;
+      if (Date.now() - startedAt > 10000) {
+        pendingAutoMessageRef.current = null;
+        setIsTyping(false);
+        pushTextEntry("agent", "Could not continue after sign in. Tap to speak and continue.");
         return;
       }
       setTimeout(poll, 150);
@@ -1308,6 +1355,7 @@ export default function Voice() {
     try {
       sessionStorage.removeItem(DEMO_CHAT_SNAPSHOT_KEY);
       sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
+      sessionStorage.removeItem(AUTO_CONTINUE_AFTER_AUTH_KEY);
     } catch {
       // Ignore storage errors
     }
