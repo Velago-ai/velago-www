@@ -1715,19 +1715,18 @@ export default function Voice() {
   function selectQuote(quote: QuoteEntry) {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
     const pricePart = `${quote.price} ${quote.currency}`;
-    const servicePart = quote.serviceId ? `, service ${quote.serviceId}` : "";
-    let text = `Yes, ${quote.provider} for ${pricePart}${servicePart}`;
+    let text = `Yes, ${quote.provider} for ${pricePart}`;
     if (quote.quoteKind === "flight") {
       const depart = quote.departureDate ?? "unknown";
       const ret = quote.returnDate ?? "unknown";
-      text = `Yes, ${quote.provider}, route ${quote.route}, departure date ${depart}, return date ${ret}, for ${pricePart}${servicePart}`;
+      text = `Yes, ${quote.provider}, route ${quote.route}, departure date ${depart}, return date ${ret}, for ${pricePart}`;
     } else if (quote.quoteKind === "parcel") {
       const fromTo =
         quote.originLabel && quote.destinationLabel
           ? `from ${quote.originLabel} to ${quote.destinationLabel}`
           : quote.route;
       const weight = quote.weightKg ? `, weight ${quote.weightKg}` : "";
-      text = `Yes, ${quote.provider}, ${fromTo}${weight}, for ${pricePart}${servicePart}`;
+      text = `Yes, ${quote.provider}, ${fromTo}${weight}, for ${pricePart}`;
     }
     markPendingUserEcho(text);
     wsRef.current.send(JSON.stringify({ type: "InjectUserMessage", text }));
