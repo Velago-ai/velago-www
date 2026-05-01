@@ -19,6 +19,7 @@ const LANDING_START_MESSAGE_KEY = "velago_landing_start_message_v1";
 const DEMO_CHAT_SNAPSHOT_KEY = "velago_demo_chat_snapshot_v1";
 const POST_AUTH_RETURN_KEY = "velago_post_auth_return";
 const AUTO_CONTINUE_AFTER_AUTH_KEY = "velago_auto_continue_after_auth_v1";
+const AUTO_CONTINUE_AFTER_AUTH_PROMPT_KEY = "velago_auto_continue_after_auth_prompt_v1";
 const AUTO_CONTINUE_AFTER_AUTH_TEXT = "Let's continue with a booking.";
 const DEMO_CHAT_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
 const CAPTURE_RATE = 48000;
@@ -315,6 +316,40 @@ function mapChatHistoryToTranscript(
     .filter((entry): entry is TextEntry => entry != null);
 }
 
+function buildAutoContinuePrompt(transcript: TranscriptEntry[]): string {
+  const reversed = [...transcript].reverse();
+  const latestQuote = reversed.find((entry): entry is QuoteEntry => entry.type === "quote");
+  const latestAgentSummary = reversed.find(
+    (entry): entry is TextEntry =>
+      entry.type === "text" &&
+      entry.role === "agent" &&
+      /(?:\bEUR\b|\bUSD\b|\bGBP\b|\bPLN\b|\bCHF\b|\b\d+(?:[.,]\d+)?\b)/i.test(entry.content)
+  );
+  const latestUserText = reversed.find(
+    (entry): entry is TextEntry => entry.type === "text" && entry.role === "user"
+  );
+
+  let summary = "";
+  if (latestAgentSummary) summary = latestAgentSummary.content.trim().replace(/[.!?]+$/, "");
+
+  if (!summary && latestQuote) {
+    const raw = [latestQuote.flightInfo, latestQuote.name, latestQuote.route].filter(Boolean).join(" ");
+    const weightMatch = raw.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+    const weight = weightMatch ? `${weightMatch[1]} kg` : "";
+    const parts = [
+      latestQuote.provider || "Previous quote",
+      latestQuote.route || "",
+      weight ? `${weight}` : "",
+      latestQuote.price && latestQuote.currency ? `${latestQuote.price} ${latestQuote.currency}` : "",
+    ].filter(Boolean);
+    summary = parts.join(", ");
+  }
+
+  if (!summary && latestUserText) summary = latestUserText.content.trim().replace(/[.!?]+$/, "");
+  if (!summary) return AUTO_CONTINUE_AFTER_AUTH_TEXT;
+  return `Let's refresh the previous search: ${summary}.`;
+}
+
 function debugReviewEdit(message: string, payload?: Record<string, unknown>) {
   if (!import.meta.env.DEV) return;
   if (payload) {
@@ -427,9 +462,11 @@ export default function Voice() {
       textInput,
     };
     try {
+      const continuePrompt = buildAutoContinuePrompt(transcript);
       sessionStorage.setItem(DEMO_CHAT_SNAPSHOT_KEY, JSON.stringify(snapshot));
       sessionStorage.setItem(POST_AUTH_RETURN_KEY, "/voice");
       sessionStorage.setItem(AUTO_CONTINUE_AFTER_AUTH_KEY, "1");
+      sessionStorage.setItem(AUTO_CONTINUE_AFTER_AUTH_PROMPT_KEY, continuePrompt);
     } catch {
       // Ignore storage errors in private mode / quota limits
     }
@@ -585,15 +622,19 @@ export default function Voice() {
     const token = getAccessToken();
     if (!token) return;
     let shouldContinue = false;
+    let continueText = AUTO_CONTINUE_AFTER_AUTH_TEXT;
     try {
       shouldContinue = sessionStorage.getItem(AUTO_CONTINUE_AFTER_AUTH_KEY) === "1";
       if (shouldContinue) sessionStorage.removeItem(AUTO_CONTINUE_AFTER_AUTH_KEY);
+      const storedPrompt = sessionStorage.getItem(AUTO_CONTINUE_AFTER_AUTH_PROMPT_KEY);
+      if (storedPrompt?.trim()) continueText = storedPrompt.trim();
+      sessionStorage.removeItem(AUTO_CONTINUE_AFTER_AUTH_PROMPT_KEY);
     } catch {
       shouldContinue = false;
     }
     if (!shouldContinue) return;
 
-    const text = AUTO_CONTINUE_AFTER_AUTH_TEXT;
+    const text = continueText;
     markPendingUserEcho(text);
     pushTextEntry("user", text);
     setIsTyping(true);
@@ -1356,6 +1397,7 @@ export default function Voice() {
       sessionStorage.removeItem(DEMO_CHAT_SNAPSHOT_KEY);
       sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
       sessionStorage.removeItem(AUTO_CONTINUE_AFTER_AUTH_KEY);
+      sessionStorage.removeItem(AUTO_CONTINUE_AFTER_AUTH_PROMPT_KEY);
     } catch {
       // Ignore storage errors
     }
