@@ -299,8 +299,9 @@ export default function Bookings() {
   const canPrev = ordersPage > 1;
   const canNext = ordersPage * PER_PAGE < ordersTotal;
 
-  const handleReorder = async (orderId?: string) => {
+  const handleReorder = async (order: UiOrder) => {
     if (reorderLoading) return;
+    const orderId = order.reorderOrderId;
     if (!orderId) {
       setReorderError("Could not reorder this booking: missing order id.");
       return;
@@ -315,7 +316,10 @@ export default function Bookings() {
     setReorderError(null);
     try {
       const reorderPayload = await reorderOrder(token, orderId);
-      savePendingReorderFlow(reorderPayload);
+      savePendingReorderFlow({
+        ...((reorderPayload ?? {}) as Record<string, unknown>),
+        category: (reorderPayload as Record<string, unknown> | null)?.category ?? order.category,
+      });
       setLocation("/voice?reorder=last");
     } catch (error) {
       setReorderError(error instanceof Error ? error.message : "Failed to reorder booking.");
@@ -397,7 +401,7 @@ export default function Bookings() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          void handleReorder(o.reorderOrderId);
+                          void handleReorder(o);
                         }}
                       >
                         <RotateCcw className="w-3 h-3" /> {reorderLoading ? "Reordering..." : "Reorder"}
@@ -454,7 +458,7 @@ export default function Bookings() {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                void handleReorder(o.reorderOrderId);
+                                void handleReorder(o);
                               }}
                             >
                               <RotateCcw className="w-4 h-4" /> {reorderLoading ? "Reordering..." : "Reorder"}
@@ -499,7 +503,7 @@ export default function Bookings() {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          void handleReorder(o.reorderOrderId);
+                          void handleReorder(o);
                         }}
                       >
                         <RotateCcw className="w-3 h-3" /> {reorderLoading ? "Reordering..." : "Reorder"}
@@ -551,7 +555,7 @@ export default function Bookings() {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                void handleReorder(o.reorderOrderId);
+                                void handleReorder(o);
                               }}
                             >
                               <RotateCcw className="w-4 h-4" /> {reorderLoading ? "Reordering..." : "Reorder"}
