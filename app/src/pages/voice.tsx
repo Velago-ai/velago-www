@@ -162,18 +162,38 @@ function collectUniqueFlightCodes(values: (string | undefined | null)[]): string
   return result;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function resolveDetailsPayload(offer: Record<string, unknown>): Record<string, unknown> {
+  const details = asRecord(offer.details);
+  const extraction = asRecord(details.extraction);
+  // Prefer explicit details fields, keep legacy extraction as fallback.
+  return { ...extraction, ...details };
+}
+
 function resolveOfferRoute(
   offer: Record<string, unknown>,
-  ext: Record<string, unknown>
+  details: Record<string, unknown>
 ): [string, string] {
   const summaryText = String(offer.name ?? offer.summary ?? offer.description ?? "");
   const m = summaryText.match(/\b([A-Z]{3})\s*-\s*([A-Z]{3})\b/);
   if (m) return [m[1], m[2]];
-  const q = String((offer.details as Record<string, unknown> | undefined)?.query ?? "").toUpperCase();
+  const q = String(details.query ?? "").toUpperCase();
   const m2 = q.match(/\b([A-Z]{3})\s+TO\s+([A-Z]{3})\b/);
   if (m2) return [m2[1], m2[2]];
-  const from = String(ext.origin_country ?? ext.origin ?? offer.origin_country ?? offer.origin ?? "?").toUpperCase();
-  const to = String(ext.destination_country ?? ext.destination ?? offer.destination_country ?? offer.destination ?? "?").toUpperCase();
+  const from = String(
+    details.origin_country ?? details.origin ?? details.origin_iata ?? offer.origin_country ?? offer.origin ?? "?"
+  ).toUpperCase();
+  const to = String(
+    details.destination_country ??
+      details.destination ??
+      details.destination_iata ??
+      offer.destination_country ??
+      offer.destination ??
+      "?"
+  ).toUpperCase();
   return [from, to];
 }
 
@@ -289,19 +309,18 @@ function normalizeIsoDate(value: unknown): string | undefined {
 
 function resolveFlightDates(
   offer: Record<string, unknown>,
-  ext: Record<string, unknown>,
-  flightInfoRaw: string
+  details: Record<string, unknown>
 ): { departureDate?: string; returnDate?: string } {
   const departureCandidates = [
-    ext.departure_date,
-    ext.depart_date,
-    ext.outbound_date,
-    ext.start_date,
-    ext.date_from,
-    ext.from_date,
-    ext.travel_date,
-    ext.departure,
-    ext.departureDate,
+    details.departure_date,
+    details.depart_date,
+    details.outbound_date,
+    details.start_date,
+    details.date_from,
+    details.from_date,
+    details.travel_date,
+    details.departure,
+    details.departureDate,
     offer.departure_date,
     offer.depart_date,
     offer.outbound_date,
@@ -313,15 +332,15 @@ function resolveFlightDates(
     offer.departureDate,
   ];
   const returnCandidates = [
-    ext.return_date,
-    ext.returnDate,
-    ext.inbound_date,
-    ext.arrival_date,
-    ext.end_date,
-    ext.date_to,
-    ext.to_date,
-    ext.return,
-    ext.arrival,
+    details.return_date,
+    details.returnDate,
+    details.inbound_date,
+    details.arrival_date,
+    details.end_date,
+    details.date_to,
+    details.to_date,
+    details.return,
+    details.arrival,
     offer.return_date,
     offer.returnDate,
     offer.inbound_date,
@@ -341,7 +360,7 @@ function resolveFlightDates(
 
 function resolveQuoteKind(
   offer: Record<string, unknown>,
-  ext: Record<string, unknown>,
+  details: Record<string, unknown>,
   flightCodes: string[],
   summaryCodes: string[],
   flightInfoRaw: string
@@ -352,11 +371,11 @@ function resolveQuoteKind(
     offer.service_category,
     offer.service_type,
     offer.product_type,
-    ext.category,
-    ext.kind,
-    ext.service_category,
-    ext.service_type,
-    ext.intent,
+    details.category,
+    details.kind,
+    details.service_category,
+    details.service_type,
+    details.intent,
   ]
     .map((value) => String(value ?? "").trim().toLowerCase())
     .filter(Boolean);
@@ -379,8 +398,8 @@ function resolveQuoteKind(
     offer.flight_info,
     offer.delivery_type,
     offer.service_type,
-    ext.delivery_type,
-    ext.service_type,
+    details.delivery_type,
+    details.service_type,
   ]
     .map((value) => String(value ?? ""))
     .join(" ")
@@ -401,15 +420,15 @@ function resolveQuoteKind(
 
 function resolveParcelMeta(
   offer: Record<string, unknown>,
-  ext: Record<string, unknown>
+  details: Record<string, unknown>
 ): { deliveryType?: string; weightKg?: string } {
   const blob = [offer.name, offer.summary, offer.description, offer.flight_info]
     .map((value) => String(value ?? ""))
     .join(" ");
 
   const deliveryCandidates = [
-    ext.delivery_type,
-    ext.service_type,
+    details.delivery_type,
+    details.service_type,
     offer.delivery_type,
     offer.service_type,
   ].map((value) => String(value ?? "").trim());
@@ -420,7 +439,13 @@ function resolveParcelMeta(
   const deliveryTypeRaw = explicitDelivery || regexDelivery || "";
   const deliveryType = deliveryTypeRaw ? normalizeDeliveryType(deliveryTypeRaw) : undefined;
 
-  const weightCandidates = [ext.weight_kg, ext.parcel_weight_kg, ext.weight, offer.weight_kg, offer.weight];
+  const weightCandidates = [
+    details.weight_kg,
+    details.parcel_weight_kg,
+    details.weight,
+    offer.weight_kg,
+    offer.weight,
+  ];
   let weightKg: string | undefined;
   for (const candidate of weightCandidates) {
     if (typeof candidate === "number" && Number.isFinite(candidate)) {
@@ -1394,7 +1419,7 @@ export default function Voice() {
   }
 
   function buildQuoteEntry(offer: Record<string, unknown>, isCheapest: boolean): QuoteEntry {
-    const ext = ((offer.details as Record<string, unknown> | undefined)?.extraction ?? {}) as Record<string, unknown>;
+    const details = resolveDetailsPayload(offer);
     const rawSegments = Array.isArray(offer.flight_segments)
       ? (offer.flight_segments as string[])
       : Array.isArray(offer.segments)
@@ -1405,18 +1430,18 @@ export default function Voice() {
       offer.name as string, offer.summary as string, offer.description as string, offer.flight_info as string,
     ]);
     const displayCodes = flightCodes.length ? flightCodes : summaryCodes;
-    const [from, to] = resolveOfferRoute(offer, ext);
+    const [from, to] = resolveOfferRoute(offer, details);
     const route = displayCodes.length ? displayCodes.join(" / ") : `${from} → ${to}`;
     const flightInfoRaw = String(offer.flight_info ?? offer.description ?? "");
-    const quoteKind = resolveQuoteKind(offer, ext, flightCodes, summaryCodes, flightInfoRaw);
+    const quoteKind = resolveQuoteKind(offer, details, flightCodes, summaryCodes, flightInfoRaw);
 
     if (quoteKind === "parcel") {
-      const parcelMeta = resolveParcelMeta(offer, ext);
+      const parcelMeta = resolveParcelMeta(offer, details);
       const originLabel = normalizeCountryLabel(
-        ext.origin_country ?? ext.origin ?? offer.origin_country ?? offer.origin
+        details.origin_country ?? details.origin ?? offer.origin_country ?? offer.origin
       );
       const destinationLabel = normalizeCountryLabel(
-        ext.destination_country ?? ext.destination ?? offer.destination_country ?? offer.destination
+        details.destination_country ?? details.destination ?? offer.destination_country ?? offer.destination
       );
       return {
         id: nextId(),
@@ -1439,7 +1464,7 @@ export default function Voice() {
     let fareName = "";
     let fareIncludes = "";
     const infoItems: string[] = [];
-    const flightDates = resolveFlightDates(offer, ext, flightInfoRaw);
+    const flightDates = resolveFlightDates(offer, details);
     let departDateFromInfo: string | undefined;
     let returnDateFromInfo: string | undefined;
     for (const part of flightInfoRaw.split("|").map((p) => p.trim())) {
