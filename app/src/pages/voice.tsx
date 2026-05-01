@@ -15,6 +15,9 @@ const WS_URL = "wss://ws.velago.ai/ws";
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
 const FEDERATED_START_PATH = "/auth/federated/start";
 const FEDERATED_RETURN_TO_OVERRIDE = import.meta.env.VITE_FEDERATED_RETURN_TO as string | undefined;
+const DEMO_CHAT_SNAPSHOT_KEY = "velago_demo_chat_snapshot_v1";
+const POST_AUTH_RETURN_KEY = "velago_post_auth_return";
+const DEMO_CHAT_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
 const CAPTURE_RATE = 48000;
 const PLAYBACK_RATE = 24000;
 const INPUT_GAIN = 1.0;
@@ -93,6 +96,12 @@ type TranscriptEntry = TextEntry | ReviewEntry | QuoteEntry | ConfirmedEntry | O
 interface PendingAutoMessage {
   text: string;
   echoUserBubble: boolean;
+}
+
+interface DemoChatSnapshot {
+  createdAt: number;
+  transcript: TranscriptEntry[];
+  textInput: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -387,11 +396,46 @@ export default function Voice() {
     waitForFirstAgentAudioRef.current = false;
   }
 
+  function saveDemoChatCheckpoint() {
+    if (getAccessToken()) return;
+    if (transcript.length === 0 && !textInput.trim()) return;
+    const snapshot: DemoChatSnapshot = {
+      createdAt: Date.now(),
+      transcript,
+      textInput,
+    };
+    try {
+      sessionStorage.setItem(DEMO_CHAT_SNAPSHOT_KEY, JSON.stringify(snapshot));
+      sessionStorage.setItem(POST_AUTH_RETURN_KEY, "/voice");
+    } catch {
+      // Ignore storage errors in private mode / quota limits
+    }
+  }
+
   // ── Auth load (best-effort) ──────────────────────────────────────────────
   useEffect(() => {
     const token = getAccessToken();
     if (token) fetchMe(token).then((p) => userStore.set(p)).catch(() => null);
     return () => { wsRef.current?.close(1000); };
+  }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) return;
+    try {
+      const raw = sessionStorage.getItem(DEMO_CHAT_SNAPSHOT_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(DEMO_CHAT_SNAPSHOT_KEY);
+      const parsed = JSON.parse(raw) as DemoChatSnapshot;
+      if (!parsed || typeof parsed.createdAt !== "number") return;
+      if (!Array.isArray(parsed.transcript)) return;
+      if (Date.now() - parsed.createdAt > DEMO_CHAT_SNAPSHOT_TTL_MS) return;
+      setTranscript(parsed.transcript);
+      if (typeof parsed.textInput === "string") setTextInput(parsed.textInput);
+      setIsTyping(false);
+    } catch {
+      sessionStorage.removeItem(DEMO_CHAT_SNAPSHOT_KEY);
+    }
   }, []);
 
   useEffect(() => {
@@ -1168,6 +1212,7 @@ export default function Voice() {
   }
 
   function startFederatedSignIn(provider: "google" | "apple") {
+    saveDemoChatCheckpoint();
     const returnTo = resolveFederatedReturnTo();
     const url = new URL(`${API_BASE}${FEDERATED_START_PATH}`);
     url.searchParams.set("provider", provider);
@@ -1176,6 +1221,7 @@ export default function Voice() {
   }
 
   function signup(path: string) {
+    if (path.startsWith("/auth")) saveDemoChatCheckpoint();
     setLocation(path);
   }
 
@@ -1187,6 +1233,12 @@ export default function Voice() {
     userStore.set(null);
     paymentUrlRef.current = null;
     shownPayActionUrlsRef.current.clear();
+    try {
+      sessionStorage.removeItem(DEMO_CHAT_SNAPSHOT_KEY);
+      sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
+    } catch {
+      // Ignore storage errors
+    }
     setLocation("/");
   }
 
@@ -1209,6 +1261,7 @@ export default function Voice() {
     <button
       onClick={() => {
         if (!hasAccessToken) {
+          saveDemoChatCheckpoint();
           setLocation("/auth");
           return;
         }
