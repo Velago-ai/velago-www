@@ -528,9 +528,7 @@ function buildAutoContinuePrompt(transcript: TranscriptEntry[]): string {
   );
 
   let summary = "";
-  if (latestAgentSummary) summary = latestAgentSummary.content.trim().replace(/[.!?]+$/, "");
-
-  if (!summary && latestQuote) {
+  if (latestQuote) {
     if (latestQuote.quoteKind === "parcel") {
       const fromTo =
         latestQuote.originLabel && latestQuote.destinationLabel
@@ -561,6 +559,7 @@ function buildAutoContinuePrompt(transcript: TranscriptEntry[]): string {
     }
   }
 
+  if (!summary && latestAgentSummary) summary = latestAgentSummary.content.trim().replace(/[.!?]+$/, "");
   if (!summary && latestUserText) summary = latestUserText.content.trim().replace(/[.!?]+$/, "");
   if (!summary) return AUTO_CONTINUE_AFTER_AUTH_TEXT;
   return `Let's refresh the previous search: ${summary}.`;
