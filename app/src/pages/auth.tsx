@@ -12,6 +12,7 @@ const LOGO_FILTER =
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
 const FEDERATED_START_PATH = "/auth/federated/start";
 const FEDERATED_RETURN_TO_OVERRIDE = import.meta.env.VITE_FEDERATED_RETURN_TO as string | undefined;
+const POST_AUTH_RETURN_KEY = "velago_post_auth_return";
 
 function GoogleGIcon() {
   return (
@@ -62,7 +63,7 @@ export default function Auth() {
     if (accessToken) {
       setTokens(accessToken, refreshToken);
       window.history.replaceState(null, "", "/auth");
-      setLocation("/voice");
+      setLocation(consumePostAuthReturn());
       return;
     }
     const authError = params.get("auth_error") ?? params.get("error_description") ?? params.get("error");
@@ -78,6 +79,19 @@ export default function Auth() {
     setSuccess(null);
   }
 
+  function consumePostAuthReturn(): string {
+    try {
+      const value = sessionStorage.getItem(POST_AUTH_RETURN_KEY);
+      if (value && value.startsWith("/")) {
+        sessionStorage.removeItem(POST_AUTH_RETURN_KEY);
+        return value;
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return "/voice";
+  }
+
   function resolveFederatedReturnTo(): string {
     const fromEnv = FEDERATED_RETURN_TO_OVERRIDE?.trim();
     if (fromEnv) return fromEnv;
@@ -88,6 +102,11 @@ export default function Auth() {
     setError(null);
     setSuccess(null);
     const returnTo = resolveFederatedReturnTo();
+    try {
+      sessionStorage.setItem(POST_AUTH_RETURN_KEY, "/voice");
+    } catch {
+      // Ignore storage errors
+    }
     const url = new URL(`${API_BASE}${FEDERATED_START_PATH}`);
     url.searchParams.set("provider", provider);
     url.searchParams.set("return_to", returnTo);
@@ -109,7 +128,7 @@ export default function Auth() {
     try {
       const tokens = await login(email, password);
       setTokens(tokens.access_token, tokens.refresh_token);
-      setLocation("/voice");
+      setLocation(consumePostAuthReturn());
     } catch (err) {
       setError((err as Error).message);
     } finally {
