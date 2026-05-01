@@ -63,9 +63,12 @@ interface QuoteEntry {
   flightInfo?: string;
   fareName?: string;
   fareIncludes?: string;
-  parcelInfo?: string;
   deliveryType?: string;
   weightKg?: string;
+  originLabel?: string;
+  destinationLabel?: string;
+  departureDate?: string;
+  returnDate?: string;
 }
 
 interface ConfirmedEntry {
@@ -181,6 +184,74 @@ function normalizeDeliveryType(value: string): string {
     .replace(/_+/g, "_");
 }
 
+function normalizeCountryLabel(value: unknown): string | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "?") return undefined;
+  const upper = raw.toUpperCase();
+  if (/^[A-Z]{2}$/.test(upper)) {
+    try {
+      return new Intl.DisplayNames(["en"], { type: "region" }).of(upper) ?? upper;
+    } catch {
+      return upper;
+    }
+  }
+  if (/^[A-Z]{3}$/.test(upper)) return upper;
+  return raw[0].toUpperCase() + raw.slice(1).toLowerCase();
+}
+
+function normalizeIsoDate(value: unknown): string | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  const m = raw.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (m) return m[1];
+  return undefined;
+}
+
+function resolveFlightDates(
+  offer: Record<string, unknown>,
+  ext: Record<string, unknown>,
+  flightInfoRaw: string
+): { departureDate?: string; returnDate?: string } {
+  const departureCandidates = [
+    ext.departure_date,
+    ext.depart_date,
+    ext.outbound_date,
+    ext.departureDate,
+    offer.departure_date,
+    offer.depart_date,
+    offer.outbound_date,
+    offer.departureDate,
+  ];
+  const returnCandidates = [
+    ext.return_date,
+    ext.returnDate,
+    ext.inbound_date,
+    ext.arrival_date,
+    offer.return_date,
+    offer.returnDate,
+    offer.inbound_date,
+    offer.arrival_date,
+  ];
+
+  let departureDate = departureCandidates.map(normalizeIsoDate).find(Boolean);
+  let returnDate = returnCandidates.map(normalizeIsoDate).find(Boolean);
+
+  if (!departureDate || !returnDate) {
+    const blob = [
+      String((offer.details as Record<string, unknown> | undefined)?.query ?? ""),
+      String(offer.name ?? ""),
+      String(offer.summary ?? ""),
+      String(offer.description ?? ""),
+      flightInfoRaw,
+    ].join(" ");
+    const allDates = blob.match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? [];
+    if (!departureDate && allDates[0]) departureDate = allDates[0];
+    if (!returnDate && allDates[1]) returnDate = allDates[1];
+  }
+
+  return { departureDate, returnDate };
+}
+
 function resolveQuoteKind(
   offer: Record<string, unknown>,
   ext: Record<string, unknown>,
@@ -243,9 +314,8 @@ function resolveQuoteKind(
 
 function resolveParcelMeta(
   offer: Record<string, unknown>,
-  ext: Record<string, unknown>,
-  route: string
-): { parcelInfo?: string; deliveryType?: string; weightKg?: string } {
+  ext: Record<string, unknown>
+): { deliveryType?: string; weightKg?: string } {
   const blob = [offer.name, offer.summary, offer.description, offer.flight_info]
     .map((value) => String(value ?? ""))
     .join(" ");
@@ -291,9 +361,7 @@ function resolveParcelMeta(
     }
   }
 
-  const parcelInfoParts = [route, deliveryType, weightKg].filter(Boolean);
   return {
-    parcelInfo: parcelInfoParts.length ? parcelInfoParts.join(" ") : undefined,
     deliveryType,
     weightKg,
   };
@@ -463,25 +531,34 @@ function buildAutoContinuePrompt(transcript: TranscriptEntry[]): string {
   if (latestAgentSummary) summary = latestAgentSummary.content.trim().replace(/[.!?]+$/, "");
 
   if (!summary && latestQuote) {
-    const raw = [
-      latestQuote.flightInfo,
-      latestQuote.parcelInfo,
-      latestQuote.deliveryType,
-      latestQuote.weightKg,
-      latestQuote.name,
-      latestQuote.route,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    const weightMatch = raw.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
-    const weight = weightMatch ? `${weightMatch[1]} kg` : "";
-    const parts = [
-      latestQuote.provider || "Previous quote",
-      latestQuote.route || "",
-      weight ? `${weight}` : "",
-      latestQuote.price && latestQuote.currency ? `${latestQuote.price} ${latestQuote.currency}` : "",
-    ].filter(Boolean);
-    summary = parts.join(", ");
+    if (latestQuote.quoteKind === "parcel") {
+      const fromTo =
+        latestQuote.originLabel && latestQuote.destinationLabel
+          ? `from ${latestQuote.originLabel} to ${latestQuote.destinationLabel}`
+          : latestQuote.route || "";
+      const parts = [
+        latestQuote.provider || "Previous quote",
+        fromTo,
+        latestQuote.weightKg || "",
+        latestQuote.price && latestQuote.currency ? `${latestQuote.price} ${latestQuote.currency}` : "",
+      ].filter(Boolean);
+      summary = parts.join(", ");
+    } else {
+      const raw = [latestQuote.flightInfo, latestQuote.name, latestQuote.route].filter(Boolean).join(" ");
+      const weightMatch = raw.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+      const weight = weightMatch ? `${weightMatch[1]} kg` : "";
+      const departureDate = latestQuote.departureDate ?? "unknown";
+      const returnDate = latestQuote.returnDate ?? "unknown";
+      const parts = [
+        latestQuote.provider || "Previous quote",
+        latestQuote.route || "",
+        `departure date ${departureDate}`,
+        `return date ${returnDate}`,
+        weight ? `${weight}` : "",
+        latestQuote.price && latestQuote.currency ? `${latestQuote.price} ${latestQuote.currency}` : "",
+      ].filter(Boolean);
+      summary = parts.join(", ");
+    }
   }
 
   if (!summary && latestUserText) summary = latestUserText.content.trim().replace(/[.!?]+$/, "");
@@ -1248,7 +1325,13 @@ export default function Voice() {
     const quoteKind = resolveQuoteKind(offer, ext, flightCodes, summaryCodes, flightInfoRaw);
 
     if (quoteKind === "parcel") {
-      const parcelMeta = resolveParcelMeta(offer, ext, route);
+      const parcelMeta = resolveParcelMeta(offer, ext);
+      const originLabel = normalizeCountryLabel(
+        ext.origin_country ?? ext.origin ?? offer.origin_country ?? offer.origin
+      );
+      const destinationLabel = normalizeCountryLabel(
+        ext.destination_country ?? ext.destination ?? offer.destination_country ?? offer.destination
+      );
       return {
         id: nextId(),
         type: "quote",
@@ -1259,15 +1342,17 @@ export default function Voice() {
         route,
         isCheapest,
         name: offer.name ? String(offer.name) : undefined,
-        parcelInfo: parcelMeta.parcelInfo,
         deliveryType: parcelMeta.deliveryType,
         weightKg: parcelMeta.weightKg,
+        originLabel,
+        destinationLabel,
       };
     }
 
     let fareName = "";
     let fareIncludes = "";
     const infoItems: string[] = [];
+    const flightDates = resolveFlightDates(offer, ext, flightInfoRaw);
     for (const part of flightInfoRaw.split("|").map((p) => p.trim())) {
       const eqIdx = part.indexOf("=");
       if (eqIdx < 0) continue;
@@ -1292,6 +1377,8 @@ export default function Voice() {
       flightInfo: infoItems.length ? infoItems.join("  •  ") : undefined,
       fareName: fareName || undefined,
       fareIncludes: fareIncludes || undefined,
+      departureDate: flightDates.departureDate,
+      returnDate: flightDates.returnDate,
     };
   }
 
@@ -1963,7 +2050,6 @@ function Bubble({
               <span className="text-sm text-muted-foreground">{entry.currency}</span>
             </div>
             <div className="text-sm text-muted-foreground">{entry.route}</div>
-            {entry.parcelInfo && <div className="text-xs text-foreground mt-1">{entry.parcelInfo}</div>}
             {entry.deliveryType && <div className="text-xs text-foreground mt-1">Service: {entry.deliveryType}</div>}
             {entry.weightKg && <div className="text-xs text-foreground mt-0.5">Weight: {entry.weightKg}</div>}
             <div className="mt-3 flex justify-end">
