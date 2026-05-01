@@ -6,6 +6,7 @@ import velagoLogo from "@assets/velago_logo_nobg.svg";
 
 
 const LOGO_BLUE_FILTER = "brightness(0) saturate(100%) invert(18%) sepia(90%) saturate(2500%) hue-rotate(220deg) brightness(95%) contrast(95%)";
+const LANDING_START_MESSAGE_KEY = "velago_landing_start_message_v1";
 import { Mic, ArrowRight, Plane, Utensils, Package, Send, RefreshCw, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,14 @@ export default function Home() {
 
   const handleQuery = (text: string) => {
     const lowerText = text.toLowerCase();
+    const message = text.trim();
+    if (message) {
+      try {
+        sessionStorage.setItem(LANDING_START_MESSAGE_KEY, message);
+      } catch {
+        // Ignore storage errors
+      }
+    }
     setTranscript("");
     setInputText("");
     setLocation("/voice");

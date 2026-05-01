@@ -15,6 +15,7 @@ const WS_URL = "wss://ws.velago.ai/ws";
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "https://api.velago.ai";
 const FEDERATED_START_PATH = "/auth/federated/start";
 const FEDERATED_RETURN_TO_OVERRIDE = import.meta.env.VITE_FEDERATED_RETURN_TO as string | undefined;
+const LANDING_START_MESSAGE_KEY = "velago_landing_start_message_v1";
 const DEMO_CHAT_SNAPSHOT_KEY = "velago_demo_chat_snapshot_v1";
 const POST_AUTH_RETURN_KEY = "velago_post_auth_return";
 const DEMO_CHAT_SNAPSHOT_TTL_MS = 30 * 60 * 1000;
@@ -359,6 +360,7 @@ export default function Voice() {
   const pendingAgentTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingUiEventTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const waitForFirstAgentAudioRef = useRef(false);
+  const autoLandingStartedRef = useRef(false);
   const autoReorderStartedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
@@ -430,6 +432,18 @@ export default function Voice() {
     }
   }
 
+  function consumeLandingStartMessage(): string | null {
+    try {
+      const raw = sessionStorage.getItem(LANDING_START_MESSAGE_KEY);
+      if (!raw) return null;
+      sessionStorage.removeItem(LANDING_START_MESSAGE_KEY);
+      const text = raw.trim();
+      return text || null;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Auth load (best-effort) ──────────────────────────────────────────────
   useEffect(() => {
     const token = getAccessToken();
@@ -487,6 +501,44 @@ export default function Voice() {
       setLocation("/settings?required=pro-profile");
     }
   }, [profile, setLocation]);
+
+  useEffect(() => {
+    if (autoLandingStartedRef.current) return;
+    const landingMessage = consumeLandingStartMessage();
+    if (!landingMessage) return;
+
+    autoLandingStartedRef.current = true;
+    markPendingUserEcho(landingMessage);
+    pushTextEntry("user", landingMessage);
+    setIsTyping(true);
+    pendingAutoMessageRef.current = {
+      text: landingMessage,
+      echoUserBubble: false,
+    };
+
+    if (sendPendingAutoMessage()) return;
+
+    const token = getAccessToken();
+    if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+      connect(token);
+      return;
+    }
+
+    if (wsRef.current.readyState === WebSocket.CONNECTING) return;
+
+    const startedAt = Date.now();
+    const poll = () => {
+      if (sendPendingAutoMessage()) return;
+      if (Date.now() - startedAt > 10000) {
+        pendingAutoMessageRef.current = null;
+        setIsTyping(false);
+        pushTextEntry("agent", "Could not start chat from landing. Tap to speak or try again.");
+        return;
+      }
+      setTimeout(poll, 150);
+    };
+    setTimeout(poll, 150);
+  }, []);
 
   useEffect(() => {
     if (autoReorderStartedRef.current) return;
