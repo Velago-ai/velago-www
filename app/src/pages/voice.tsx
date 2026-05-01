@@ -357,6 +357,7 @@ export default function Voice() {
   const pendingUserEchoesRef = useRef<Map<string, number>>(new Map());
   const pendingAgentTextsRef = useRef<string[]>([]);
   const pendingAgentTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingUiEventTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const waitForFirstAgentAudioRef = useRef(false);
   const autoReorderStartedRef = useRef(false);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
@@ -392,8 +393,25 @@ export default function Voice() {
       clearTimeout(pendingAgentTextTimerRef.current);
       pendingAgentTextTimerRef.current = null;
     }
+    if (pendingUiEventTimerRef.current) {
+      clearTimeout(pendingUiEventTimerRef.current);
+      pendingUiEventTimerRef.current = null;
+    }
     pendingAgentTextsRef.current = [];
     waitForFirstAgentAudioRef.current = false;
+  }
+
+  function enqueueUiEventAfterSpeech(run: () => void) {
+    const delayMs = Math.max(0, agentSpeakingUntilRef.current - Date.now());
+    if (delayMs === 0) {
+      run();
+      return;
+    }
+    if (pendingUiEventTimerRef.current) clearTimeout(pendingUiEventTimerRef.current);
+    pendingUiEventTimerRef.current = setTimeout(() => {
+      pendingUiEventTimerRef.current = null;
+      run();
+    }, delayMs);
   }
 
   function saveDemoChatCheckpoint() {
@@ -829,14 +847,16 @@ export default function Voice() {
       return;
     }
     if (t === "DemoSignupOffer") {
-      setIsTyping(false);
       const prompt = String(msg.prompt ?? "Would you like to signup?");
       const signupPath = resolveSignupPath(msg.signup_url ?? msg.signupUrl);
-      pushEntry({
-        id: nextId(),
-        type: "signup_offer",
-        prompt,
-        signupPath,
+      enqueueUiEventAfterSpeech(() => {
+        setIsTyping(false);
+        pushEntry({
+          id: nextId(),
+          type: "signup_offer",
+          prompt,
+          signupPath,
+        });
       });
       return;
     }
