@@ -1352,18 +1352,29 @@ export default function Voice() {
     let fareIncludes = "";
     const infoItems: string[] = [];
     const flightDates = resolveFlightDates(offer, ext, flightInfoRaw);
+    let departDateFromInfo: string | undefined;
+    let returnDateFromInfo: string | undefined;
     for (const part of flightInfoRaw.split("|").map((p) => p.trim())) {
       const eqIdx = part.indexOf("=");
       if (eqIdx < 0) continue;
       const k = part.substring(0, eqIdx).trim();
       const v = part.substring(eqIdx + 1).trim();
-      if (k === "depart") infoItems.push(`🛫 ${v}`);
-      else if (k === "arrive") infoItems.push(`🛬 ${v}`);
+      if (k === "depart") {
+        infoItems.push(`🛫 ${v}`);
+        departDateFromInfo = normalizeIsoDate(v) ?? departDateFromInfo;
+      } else if (k === "arrive") {
+        infoItems.push(`🛬 ${v}`);
+        returnDateFromInfo = normalizeIsoDate(v) ?? returnDateFromInfo;
+      }
       else if (k === "duration") infoItems.push(`⏱ ${v}`);
       else if (k === "trip") infoItems.push(v === "one_way" ? "One way" : "Round trip");
       else if (k === "fare") fareName = v;
       else if (k === "includes") fareIncludes = v;
     }
+    const departureDate = departDateFromInfo ?? flightDates.departureDate;
+    const returnDate = returnDateFromInfo ?? flightDates.returnDate;
+    infoItems.push(`📅 Departure: ${departureDate ?? "unknown"}`);
+    infoItems.push(`📅 Return: ${returnDate ?? "unknown"}`);
     return {
       id: nextId(),
       type: "quote",
@@ -1376,8 +1387,8 @@ export default function Voice() {
       flightInfo: infoItems.length ? infoItems.join("  •  ") : undefined,
       fareName: fareName || undefined,
       fareIncludes: fareIncludes || undefined,
-      departureDate: flightDates.departureDate,
-      returnDate: flightDates.returnDate,
+      departureDate,
+      returnDate,
     };
   }
 
