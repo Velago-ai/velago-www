@@ -53,6 +53,7 @@ interface ReviewEntry {
 interface QuoteEntry {
   id: string;
   type: "quote";
+  quoteKind: "flight" | "parcel";
   provider: string;
   price: string;
   currency: string;
@@ -62,6 +63,9 @@ interface QuoteEntry {
   flightInfo?: string;
   fareName?: string;
   fareIncludes?: string;
+  parcelInfo?: string;
+  deliveryType?: string;
+  weightKg?: string;
 }
 
 interface ConfirmedEntry {
@@ -167,6 +171,132 @@ function resolveOfferRoute(
   const from = String(ext.origin_country ?? ext.origin ?? offer.origin_country ?? offer.origin ?? "?").toUpperCase();
   const to = String(ext.destination_country ?? ext.destination ?? offer.destination_country ?? offer.destination ?? "?").toUpperCase();
   return [from, to];
+}
+
+function normalizeDeliveryType(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/_+/g, "_");
+}
+
+function resolveQuoteKind(
+  offer: Record<string, unknown>,
+  ext: Record<string, unknown>,
+  flightCodes: string[],
+  summaryCodes: string[],
+  flightInfoRaw: string
+): "flight" | "parcel" {
+  const explicitCategoryValues = [
+    offer.category,
+    offer.kind,
+    offer.service_category,
+    offer.service_type,
+    offer.product_type,
+    ext.category,
+    ext.kind,
+    ext.service_category,
+    ext.service_type,
+    ext.intent,
+  ]
+    .map((value) => String(value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+
+  if (explicitCategoryValues.some((value) => value.includes("flight") || value.includes("air"))) {
+    return "flight";
+  }
+  if (
+    explicitCategoryValues.some(
+      (value) => value.includes("parcel") || value.includes("delivery") || value.includes("shipping")
+    )
+  ) {
+    return "parcel";
+  }
+
+  const lowerBlob = [
+    offer.name,
+    offer.summary,
+    offer.description,
+    offer.flight_info,
+    offer.delivery_type,
+    offer.service_type,
+    ext.delivery_type,
+    ext.service_type,
+  ]
+    .map((value) => String(value ?? ""))
+    .join(" ")
+    .toLowerCase();
+
+  const hasFlightSignals =
+    flightCodes.length > 0 ||
+    summaryCodes.length > 0 ||
+    /depart=|arrive=|duration=|trip=|fare=|includes=/.test(flightInfoRaw);
+  const hasParcelSignals = /parcel|shipment|shipping|delivery|door[_ ]?to[_ ]?door|pickup|drop[_ ]?off|\bkg\b/.test(
+    lowerBlob
+  );
+
+  if (hasParcelSignals && !hasFlightSignals) return "parcel";
+  if (hasFlightSignals) return "flight";
+  return "parcel";
+}
+
+function resolveParcelMeta(
+  offer: Record<string, unknown>,
+  ext: Record<string, unknown>,
+  route: string
+): { parcelInfo?: string; deliveryType?: string; weightKg?: string } {
+  const blob = [offer.name, offer.summary, offer.description, offer.flight_info]
+    .map((value) => String(value ?? ""))
+    .join(" ");
+
+  const deliveryCandidates = [
+    ext.delivery_type,
+    ext.service_type,
+    offer.delivery_type,
+    offer.service_type,
+  ].map((value) => String(value ?? "").trim());
+  const explicitDelivery = deliveryCandidates.find(Boolean);
+  const regexDelivery = blob.match(
+    /\b(door[_ ]?to[_ ]?door|door[_ ]?to[_ ]?pickup|pickup[_ ]?to[_ ]?door|pickup[_ ]?to[_ ]?pickup|locker[_ ]?to[_ ]?locker|courier)\b/i
+  )?.[1];
+  const deliveryTypeRaw = explicitDelivery || regexDelivery || "";
+  const deliveryType = deliveryTypeRaw ? normalizeDeliveryType(deliveryTypeRaw) : undefined;
+
+  const weightCandidates = [ext.weight_kg, ext.parcel_weight_kg, ext.weight, offer.weight_kg, offer.weight];
+  let weightKg: string | undefined;
+  for (const candidate of weightCandidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      weightKg = `${candidate.toFixed(2)}kg`;
+      break;
+    }
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      const numeric = Number(trimmed.replace(",", "."));
+      if (Number.isFinite(numeric) && trimmed !== "") {
+        weightKg = `${numeric.toFixed(2)}kg`;
+        break;
+      }
+      const weightMatch = trimmed.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+      if (weightMatch) {
+        weightKg = `${Number(weightMatch[1].replace(",", ".")).toFixed(2)}kg`;
+        break;
+      }
+    }
+  }
+  if (!weightKg) {
+    const weightMatch = blob.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+    if (weightMatch) {
+      weightKg = `${Number(weightMatch[1].replace(",", ".")).toFixed(2)}kg`;
+    }
+  }
+
+  const parcelInfoParts = [route, deliveryType, weightKg].filter(Boolean);
+  return {
+    parcelInfo: parcelInfoParts.length ? parcelInfoParts.join(" ") : undefined,
+    deliveryType,
+    weightKg,
+  };
 }
 
 function extractPaymentUrl(value: string): string | null {
@@ -333,7 +463,16 @@ function buildAutoContinuePrompt(transcript: TranscriptEntry[]): string {
   if (latestAgentSummary) summary = latestAgentSummary.content.trim().replace(/[.!?]+$/, "");
 
   if (!summary && latestQuote) {
-    const raw = [latestQuote.flightInfo, latestQuote.name, latestQuote.route].filter(Boolean).join(" ");
+    const raw = [
+      latestQuote.flightInfo,
+      latestQuote.parcelInfo,
+      latestQuote.deliveryType,
+      latestQuote.weightKg,
+      latestQuote.name,
+      latestQuote.route,
+    ]
+      .filter(Boolean)
+      .join(" ");
     const weightMatch = raw.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
     const weight = weightMatch ? `${weightMatch[1]} kg` : "";
     const parts = [
@@ -1105,11 +1244,31 @@ export default function Voice() {
     const displayCodes = flightCodes.length ? flightCodes : summaryCodes;
     const [from, to] = resolveOfferRoute(offer, ext);
     const route = displayCodes.length ? displayCodes.join(" / ") : `${from} → ${to}`;
-    const flightInfo = String(offer.flight_info ?? offer.description ?? "");
+    const flightInfoRaw = String(offer.flight_info ?? offer.description ?? "");
+    const quoteKind = resolveQuoteKind(offer, ext, flightCodes, summaryCodes, flightInfoRaw);
+
+    if (quoteKind === "parcel") {
+      const parcelMeta = resolveParcelMeta(offer, ext, route);
+      return {
+        id: nextId(),
+        type: "quote",
+        quoteKind: "parcel",
+        provider: String(offer.provider ?? ""),
+        price: offer.price != null ? Number(offer.price).toFixed(2) : "—",
+        currency: String(offer.currency ?? "EUR"),
+        route,
+        isCheapest,
+        name: offer.name ? String(offer.name) : undefined,
+        parcelInfo: parcelMeta.parcelInfo,
+        deliveryType: parcelMeta.deliveryType,
+        weightKg: parcelMeta.weightKg,
+      };
+    }
+
     let fareName = "";
     let fareIncludes = "";
     const infoItems: string[] = [];
-    for (const part of flightInfo.split("|").map((p) => p.trim())) {
+    for (const part of flightInfoRaw.split("|").map((p) => p.trim())) {
       const eqIdx = part.indexOf("=");
       if (eqIdx < 0) continue;
       const k = part.substring(0, eqIdx).trim();
@@ -1124,6 +1283,7 @@ export default function Voice() {
     return {
       id: nextId(),
       type: "quote",
+      quoteKind: "flight",
       provider: String(offer.provider ?? ""),
       price: offer.price != null ? Number(offer.price).toFixed(2) : "—",
       currency: String(offer.currency ?? "EUR"),
@@ -1789,6 +1949,31 @@ function Bubble({
   }
 
   if (entry.type === "quote") {
+    if (entry.quoteKind === "parcel") {
+      return (
+        <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
+          <VelaAvatar />
+          <div className={`vg-card flex-1 p-4 ${entry.isCheapest ? "ring-1 ring-primary/30" : ""}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{entry.provider}</div>
+              {entry.isCheapest && <span className="vg-chip vg-chip-confirmed">Cheapest</span>}
+            </div>
+            <div className="flex items-baseline gap-1 mb-1">
+              <span className="text-2xl font-bold text-foreground font-display">{entry.price}</span>
+              <span className="text-sm text-muted-foreground">{entry.currency}</span>
+            </div>
+            <div className="text-sm text-muted-foreground">{entry.route}</div>
+            {entry.parcelInfo && <div className="text-xs text-foreground mt-1">{entry.parcelInfo}</div>}
+            {entry.deliveryType && <div className="text-xs text-foreground mt-1">Service: {entry.deliveryType}</div>}
+            {entry.weightKg && <div className="text-xs text-foreground mt-0.5">Weight: {entry.weightKg}</div>}
+            <div className="mt-3 flex justify-end">
+              <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry.provider, entry.price, entry.currency); }}>Select</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex items-start gap-2 vg-fade-up" style={{ animationDelay: delay }}>
         <VelaAvatar />
@@ -1807,6 +1992,7 @@ function Bubble({
           {entry.fareName && (
             <div className="text-xs font-semibold text-primary uppercase tracking-wide mt-1">{entry.fareName}</div>
           )}
+          {entry.fareIncludes && <div className="text-xs text-muted-foreground mt-0.5">{entry.fareIncludes}</div>}
           <div className="mt-3 flex justify-end">
             <button className="vg-btn-primary py-2 px-5 text-sm" onClick={(e) => { e.stopPropagation(); onSelect?.(entry.provider, entry.price, entry.currency); }}>Select</button>
           </div>
