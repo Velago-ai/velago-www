@@ -319,6 +319,7 @@ export default function Bookings() {
       savePendingReorderFlow({
         ...((reorderPayload ?? {}) as Record<string, unknown>),
         category: (reorderPayload as Record<string, unknown> | null)?.category ?? order.category,
+        selected_order_id: orderId,
       });
       setLocation("/voice?reorder=last");
     } catch (error) {

@@ -1,4 +1,8 @@
 export const REORDER_CHAT_MESSAGE = "Vela please reorder this booking with new dates.";
+export const REORDER_CHAT_MESSAGE_FLIGHT =
+  "Vela please reorder my last flight booking with new departure and return dates (category: flights).";
+export const REORDER_CHAT_MESSAGE_PARCEL =
+  "Vela please reorder my last parcel delivery booking (category: parcel_delivery).";
 
 const REORDER_FLOW_STORAGE_KEY = "velago_reorder_flow";
 
@@ -85,9 +89,20 @@ function buildFlightReorderMessage(source: Record<string, unknown>): string | nu
       "reorder_payload.details.inbound_date",
     ])
   );
+  const orderId = firstString(source, [
+    "selected_order_id",
+    "order_id",
+    "id",
+    "meshhub_order_id",
+    "supplier_order_id",
+    "reorder_payload.order_id",
+    "data.order_id",
+    "result.order_id",
+  ]);
 
   if (!from || !to || !departureDate || !returnDate) return null;
-  return `Vela please reorder this flight from ${from} to ${to}, departure date ${departureDate}, return date ${returnDate}.`;
+  const orderPart = orderId ? `, order id ${orderId}` : "";
+  return `Vela please reorder this flight from ${from} to ${to}, departure date ${departureDate}, return date ${returnDate}${orderPart}.`;
 }
 
 function buildParcelReorderMessage(source: Record<string, unknown>): string | null {
@@ -112,10 +127,21 @@ function buildParcelReorderMessage(source: Record<string, unknown>): string | nu
     "details.service_type",
     "reorder_payload.details.delivery_type",
   ]);
+  const orderId = firstString(source, [
+    "selected_order_id",
+    "order_id",
+    "id",
+    "meshhub_order_id",
+    "supplier_order_id",
+    "reorder_payload.order_id",
+    "data.order_id",
+    "result.order_id",
+  ]);
 
   if (!from || !to || weight == null) return null;
   const deliveryPart = deliveryType ? `, delivery type ${deliveryType}` : "";
-  return `Vela please reorder this parcel from ${from} to ${to}, weight ${weight.toFixed(2)} kg${deliveryPart}.`;
+  const orderPart = orderId ? `, order id ${orderId}` : "";
+  return `Vela please reorder this parcel from ${from} to ${to}, weight ${weight.toFixed(2)} kg${deliveryPart}${orderPart}.`;
 }
 
 function buildReorderMessage(order: unknown): string {
@@ -149,8 +175,8 @@ function buildReorderMessage(order: unknown): string {
   const isFlight = categoryRaw.includes("flight") || categoryRaw.includes("air");
   const isParcel = categoryRaw.includes("parcel") || categoryRaw.includes("delivery");
 
-  if (isFlight) return buildFlightReorderMessage(source) ?? REORDER_CHAT_MESSAGE;
-  if (isParcel) return buildParcelReorderMessage(source) ?? REORDER_CHAT_MESSAGE;
+  if (isFlight) return buildFlightReorderMessage(source) ?? REORDER_CHAT_MESSAGE_FLIGHT;
+  if (isParcel) return buildParcelReorderMessage(source) ?? REORDER_CHAT_MESSAGE_PARCEL;
 
   return buildFlightReorderMessage(source) ?? buildParcelReorderMessage(source) ?? REORDER_CHAT_MESSAGE;
 }
